@@ -2,40 +2,37 @@ import os
 import sys
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 
 def run_eda(file_path: str):
     """
-    Carga el conjunto de datos de transacciones, realiza una limpieza inicial
-    y analiza el desbalance de clases entre transacciones normales y anómalas.
+    Carga el conjunto de datos de transacciones, realiza limpieza inicial,
+    analiza el desbalance de clases y guarda la gráfica para la documentación.
     """
     print("=" * 65)
     print("FINTECH FRAUD GUARD — ANÁLISIS EXPLORATORIO DE DATOS (EDA)")
     print("=" * 65)
 
-    # 1. Carga y verificación del archivo
     if not os.path.exists(file_path):
         print(f"[ERROR] No se encontró el archivo de datos en: {file_path}")
-        print("Asegúrate de colocar tu conjunto de datos (ej. transactions.csv) en la ruta indicada.")
         sys.exit(1)
 
     print(f"[INFO] Cargando dataset desde: {file_path} ...")
     df = pd.read_csv(file_path)
     
+    # 1. Resumen General
     print("\n[1] INFORMACIÓN GENERAL DEL DATASET:")
     print(f" - Total de registros (filas): {df.shape[0]:,}")
-    print(f" - Total de columnas: {df.shape[1]}")
-    print(f" - Nombres de columnas: {list(df.columns)}")
+    print(f" - Total de características (columnas): {df.shape[1]}")
+    print(f" - Columnas detectadas: {list(df.columns)}")
 
-    # 2. Verificación de nulos y duplicados
+    # 2. Limpieza Inicial
     print("\n[2] LIMPIEZA INICIAL Y CALIDAD DE DATOS:")
-    
     null_counts = df.isnull().sum()
     total_nulls = null_counts.sum()
     print(f" - Total de valores nulos/faltantes: {total_nulls}")
     
     if total_nulls > 0:
-        print("   Detalle de nulos por columna:")
-        print(null_counts[null_counts > 0])
         df = df.dropna()
         print(f"   -> Registros tras eliminar nulos: {df.shape[0]:,}")
     else:
@@ -47,7 +44,7 @@ def run_eda(file_path: str):
         df = df.drop_duplicates()
         print(f"   -> Registros tras eliminar duplicados: {df.shape[0]:,}")
 
-    # 3. Detección de la variable objetivo
+    # 3. Variable Objetivo
     target_col = None
     possible_targets = ['is_fraud', 'Class', 'label', 'fraude', 'target', 'isFraud']
     
@@ -57,11 +54,10 @@ def run_eda(file_path: str):
             break
 
     if not target_col:
-        print("\n[ADVERTENCIA] No se identificó automáticamente la columna objetivo.")
-        print(f"Asegúrate de que la columna de fraude se llame una de estas: {possible_targets}")
+        print("\n[ERROR] No se encontró la columna objetivo.")
         return df
 
-    # 4. Identificación del desbalance de clases
+    # 4. Desbalance de Clases
     print(f"\n[3] ANÁLISIS DE DESBALANCE DE CLASES (Variable: '{target_col}'):")
     class_counts = df[target_col].value_counts()
     class_percentages = df[target_col].value_counts(normalize=True) * 100
@@ -72,32 +68,33 @@ def run_eda(file_path: str):
     print(f" - Transacciones Normales (Clase 0): {normal_count:,} ({class_percentages.get(0, 0):.2f}%)")
     print(f" - Transacciones Anómalas/Fraude (Clase 1): {fraud_count:,} ({class_percentages.get(1, 0):.2f}%)")
 
-    # Diagnóstico técnico del desbalance
-    imbalance_ratio = (fraud_count / normal_count) * 100 if normal_count > 0 else 0
-    print(f" - Proporción de Fraude: {imbalance_ratio:.2f}% respecto a normales.")
-    
-    print("\n[4] DIAGNÓSTICO Y RECOMENDACIONES TÉCNICAS:")
-    if imbalance_ratio < 5:
-        print(" [!] ALERTA: Desbalance SEVERO de clases detectado.")
-        print("     Recomendación para la etapa de modelado:")
-        print("     1. Usar métricas orientadas a desbalance: ROC-AUC, Precision, Recall y F1-Score.")
-        print("     2. Evitar usar 'Accuracy' (Exactitud) como métrica principal.")
-        print("     3. Considerar técnicas de rebalanceo (SMOTE, Undersampling o pesos de clase).")
-    else:
-        print(" [i] El conjunto de datos presenta una distribución con balance moderado.")
+    # 5. Generar y Guardar Gráfica de Apoyo
+    assets_dir = os.path.join("docs", "assets")
+    os.makedirs(assets_dir, exist_ok=True)
+    chart_path = os.path.join(assets_dir, "class_distribution.png")
 
+    plt.figure(figsize=(7, 4.5))
+    bars = plt.bar(['Legítimas (0)', 'Fraude (1)'], [normal_count, fraud_count], color=['#2ec4b6', '#e71d36'])
+    plt.title("Distribución de Clases: Transacciones Normales vs. Anómalas", fontsize=11, fontweight='bold')
+    plt.ylabel("Cantidad de Transacciones")
+    
+    for bar in bars:
+        yval = bar.get_height()
+        plt.text(bar.get_x() + bar.get_width()/2.0, yval + 10, f'{int(yval):,}', ha='center', va='bottom', fontweight='bold')
+
+    plt.tight_layout()
+    plt.savefig(chart_path, dpi=300)
+    plt.close()
+
+    print(f"\n[ÉXITO] Gráfica de distribución guardada en: {chart_path}")
     print("\n" + "=" * 65)
-    print("ANÁLISIS EXPLORATORIO COMPLETADO CON ÉXITO")
+    print("ANÁLISIS EXPLORATORIO COMPLETADO")
     print("=" * 65)
     
     return df
 
 if __name__ == "__main__":
-    # Ruta predeterminada para el dataset
     DATA_PATH = os.path.join("data", "raw", "transactions.csv")
-    
-    # Permitir pasar una ruta desde consola si el dataset está en otro lugar
     if len(sys.argv) > 1:
         DATA_PATH = sys.argv[1]
-        
     run_eda(DATA_PATH)
