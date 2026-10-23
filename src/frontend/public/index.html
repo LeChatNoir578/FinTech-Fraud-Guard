@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Mitigación de Clickjacking (Requisito Seguridad) -->
+    <meta http-equiv="X-Frame-Options" content="DENY">
+    <title>FinTech Fraud Guard</title>
+    
+    <!-- DOMPurify para prevención XSS (Requisito Seguridad) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
+    
+    <!-- Hoja de estilos externa -->
+    <link rel="stylesheet" href="./css/style.css">
+</head>
+<body>
+
+    <div class="container">
+        <!-- Lado Izquierdo: Formulario de Entrada -->
+        <div class="panel-left">
+            <h2>Analizador de Transacciones</h2>
+            <form id="transactionForm">
+                <div class="form-group">
+                    <label for="userId">ID del Usuario:</label>
+                    <input type="text" id="userId" placeholder="Ej. USR-9082" required>
+                </div>
+                <div class="form-group">
+                    <label for="amount">Monto ($):</label>
+                    <input type="number" id="amount" step="0.01" placeholder="0.00" required>
+                </div>
+                <div class="form-group">
+                    <label for="location">Ubicación o IP:</label>
+                    <input type="text" id="location" placeholder="Ej. 192.168.1.1 o CDMX" required>
+                </div>
+                <div class="form-group">
+                    <label for="description">Descripción / Motivo:</label>
+                    <textarea id="description" rows="3" placeholder="Detalles de la transferencia..."></textarea>
+                </div>
+                <button type="submit">Evaluar Riesgo</button>
+            </form>
+        </div>
+
+        <!-- Lado Derecho: Panel de Resultados -->
+        <div class="panel-right">
+            <h2>Resultados del Análisis</h2>
+            
+            <p class="section-label">Nivel de Riesgo:</p>
+            <div class="risk-indicator" id="riskIndicator">
+                <span class="risk-level risk-low" id="lblBajo">Bajo</span>
+                <span class="risk-level risk-medium" id="lblMedio">Medio</span>
+                <span class="risk-level risk-high" id="lblAlto">Alto</span>
+            </div>
+
+            <p class="section-label">Probabilidad de fraude (IA): <span id="fraudProbability" class="highlight-text">--</span> %</p>
+            
+            <p class="section-label">Análisis de Texto (NLP):</p>
+            <div class="result-box" id="nlpResult">
+                <span class="placeholder-text">Esperando ejecución del modelo...</span>
+            </div>
+
+            <!-- Alerta Ejecutiva (Requisito Inglés VI de Emily) -->
+            <div class="alert-english" id="englishAlert">
+                "If suspicious activity is detected, the system will flag the transaction for review."
+            </div>
+        </div>
+    </div>
+
+    <!-- Script principal con la lógica de validación -->
+    <script type="module" src="./js/app.js"></script>
+</body>
+</html>
