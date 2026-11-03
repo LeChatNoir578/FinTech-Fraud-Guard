@@ -1,0 +1,36 @@
+[
+    {
+        "_id": {
+            "$oid": "65c000000000000000000001"
+        },
+        "id_cuenta": "CTA-1001",
+        "id_transaccion": {
+            "$oid": "65b000000000000000000001"
+        },
+        "tipo_alerta": "Fraude_Detectado",
+        "nivel_riesgo": "Alto",
+        "fecha_hora": {
+            "$date": "2026-10-25T18:45:01.000Z"
+        },
+        "metricas_ia": {
+            "modelo_evaluador": "RandomForest_SVM",
+            "probabilidad_fraude": 0.89,
+            "es_anomala": true,
+            "entropia_cruzada": 0.234
+        },
+        "analisis_nlp": {
+            "tasa_phishing": 0.92,
+            "patron_ingenieria_social": "Urgent transfer / Prize claim",
+            "sentimiento": "Urgente",
+            "f1_score_modelo": 0.95
+        },
+        "alerta_ejecutiva_en": {
+            "estructura_gramatical": "First Conditional",
+            "mensaje_ingles": "If high fraud risk is detected, the system will block the account immediately.",
+            "intensificadores_usados": [
+                "too much",
+                "high enough"
+            ]
+        }
+    }
+]

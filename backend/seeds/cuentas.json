@@ -1,0 +1,13 @@
+[
+    {
+        "_id": "CTA-1001",
+        "id_usuario": {
+            "$oid": "65a000000000000000000001"
+        },
+        "saldo": 15500.5,
+        "tipo_cuenta": "Ahorros",
+        "fecha_apertura": {
+            "$date": "2026-10-25T10:05:00.000Z"
+        }
+    }
+]

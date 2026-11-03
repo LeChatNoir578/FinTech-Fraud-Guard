@@ -1,0 +1,27 @@
+[
+    {
+        "_id": {
+            "$oid": "65b000000000000000000001"
+        },
+        "id_cuenta": "CTA-1001",
+        "monto": 12500,
+        "tipo_operacion": "Transferencia",
+        "descripcion": "Urgent transfer for prize claiming process",
+        "ubicacion_geografica": {
+            "latitud": 19.4326,
+            "longitud": -99.1332,
+            "pais": "MX",
+            "ciudad": "CDMX"
+        },
+        "fecha_hora": {
+            "$date": "2026-10-25T18:45:00.000Z"
+        },
+        "estado": "En_Revision",
+        "sanitizacion_seguridad": {
+            "sanitizado_frontend": true,
+            "xss_detectado": false,
+            "sqli_detectado": false,
+            "ip_origen": "192.168.1.50"
+        }
+    }
+]
