@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
@@ -92,17 +91,25 @@ class BatchUploadResponse {
 }
 
 class ApiService {
-  // Detección automática de la URL según plataforma
+  // Configuración de red para dispositivo físico Android
+  // Permite configurar la dirección IP de la red local (host) en lugar de 'localhost' o '127.0.0.1'
+  static String host = "192.168.120.159";
+  static int port = 8000;
+
+  /// Permite actualizar dinámicamente la IP del servidor FastAPI desde la app
+  static void setNetworkConfig(String newHost, [int? newPort]) {
+    host = newHost.trim().replaceAll("http://", "").replaceAll("https://", "").split("/").first.split(":").first;
+    if (newPort != null) {
+      port = newPort;
+    }
+  }
+
+  /// URL base calculada para comunicación entre el dispositivo físico y FastAPI
   static String get baseUrl {
     if (kIsWeb) {
-      return "http://localhost:8000";
+      return "http://localhost:$port";
     }
-    try {
-      if (Platform.isAndroid) {
-        return "http://10.0.2.2:8000";
-      }
-    } catch (_) {}
-    return "http://localhost:8000";
+    return "http://$host:$port";
   }
 
   /// Carga masiva de transacciones mediante multipart/form-data

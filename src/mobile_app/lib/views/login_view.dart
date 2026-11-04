@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
+import '../services/api_service.dart';
 import 'user_web_view.dart';
 import 'bank_batch_view.dart';
 
@@ -40,6 +41,60 @@ class _LoginViewState extends State<LoginView> {
         );
       }
     }
+  }
+
+  void _showServerConfigDialog() {
+    final ipController = TextEditingController(text: ApiService.host);
+    final portController = TextEditingController(text: ApiService.port.toString());
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.surface,
+        title: const Text("Configuración de Servidor FastAPI", style: TextStyle(color: AppTheme.goldImperial, fontSize: 16)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              "Configura la IP de tu PC en la red local para conectar tu dispositivo móvil físico:",
+              style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: ipController,
+              decoration: const InputDecoration(labelText: "IP Local del Servidor", hintText: "ej. 192.168.120.159"),
+              style: const TextStyle(color: AppTheme.textPrimary),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: portController,
+              decoration: const InputDecoration(labelText: "Puerto", hintText: "8000"),
+              keyboardType: TextInputType.number,
+              style: const TextStyle(color: AppTheme.textPrimary),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text("Cancelar", style: TextStyle(color: AppTheme.textSecondary)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final newHost = ipController.text.trim();
+              final newPort = int.tryParse(portController.text.trim()) ?? 8000;
+              if (newHost.isNotEmpty) {
+                ApiService.setNetworkConfig(newHost, newPort);
+                setState(() {});
+              }
+              Navigator.pop(ctx);
+            },
+            child: const Text("Guardar"),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -108,7 +163,37 @@ class _LoginViewState extends State<LoginView> {
                             letterSpacing: 0.2,
                           ),
                         ),
-                        const SizedBox(height: 32),
+                        const SizedBox(height: 14),
+
+                        // Indicador de IP del Servidor FastAPI para Dispositivos Físicos
+                        Center(
+                          child: InkWell(
+                            onTap: _showServerConfigDialog,
+                            borderRadius: BorderRadius.circular(20),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: AppTheme.surfaceLight,
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(color: AppTheme.borderGold),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.wifi, color: AppTheme.goldImperial, size: 14),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    "Host API: ${ApiService.host}:${ApiService.port}",
+                                    style: const TextStyle(color: AppTheme.goldLight, fontSize: 11, fontWeight: FontWeight.w600),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  const Icon(Icons.edit, color: AppTheme.textSecondary, size: 12),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 24),
 
                         // Selector de Rol (Dropdown)
                         const Text(

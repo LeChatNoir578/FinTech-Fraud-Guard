@@ -1,8 +1,7 @@
-import 'dart:io' show Platform;
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../theme/app_theme.dart';
+import '../services/api_service.dart';
 
 class UserWebView extends StatefulWidget {
   const UserWebView({super.key});
@@ -15,7 +14,7 @@ class _UserWebViewState extends State<UserWebView> {
   WebViewController? _controller;
   bool _isLoading = true;
   bool _hasError = false;
-  String _targetUrl = "http://localhost:8000/dashboard";
+  String _targetUrl = "http://192.168.120.159:8000/dashboard";
 
   @override
   void initState() {
@@ -25,22 +24,11 @@ class _UserWebViewState extends State<UserWebView> {
   }
 
   void _determineUrl() {
-    if (kIsWeb) {
-      _targetUrl = "http://localhost:8000/dashboard";
-    } else {
-      try {
-        if (Platform.isAndroid) {
-          _targetUrl = "http://10.0.2.2:8000/dashboard";
-        } else {
-          _targetUrl = "http://localhost:8000/dashboard";
-        }
-      } catch (_) {
-        _targetUrl = "http://localhost:8000/dashboard";
-      }
-    }
+    _targetUrl = "${ApiService.baseUrl}/dashboard";
   }
 
   void _initWebView() {
+    _determineUrl();
     try {
       final controller = WebViewController()
         ..setJavaScriptMode(JavaScriptMode.unrestricted)
@@ -48,7 +36,12 @@ class _UserWebViewState extends State<UserWebView> {
         ..setNavigationDelegate(
           NavigationDelegate(
             onPageStarted: (String url) {
-              if (mounted) setState(() => _isLoading = true);
+              if (mounted) {
+                setState(() {
+                  _isLoading = true;
+                  _hasError = false;
+                });
+              }
             },
             onPageFinished: (String url) {
               if (mounted) {
@@ -59,12 +52,15 @@ class _UserWebViewState extends State<UserWebView> {
               }
             },
             onWebResourceError: (WebResourceError error) {
-              // Si falla por loopback en pruebas o emuladores
-              if (mounted) {
-                setState(() {
-                  _isLoading = false;
-                  _hasError = true;
-                });
+              debugPrint("WebView Error: ${error.description} (code: ${error.errorCode}, isMainFrame: ${error.isForMainFrame})");
+              // Solo cambiar a estado de error si falla la carga del frame principal
+              if (error.isForMainFrame ?? true) {
+                if (mounted) {
+                  setState(() {
+                    _isLoading = false;
+                    _hasError = true;
+                  });
+                }
               }
             },
           ),
@@ -74,11 +70,90 @@ class _UserWebViewState extends State<UserWebView> {
       _controller = controller;
     } catch (e) {
       debugPrint("Error inicializando WebViewController: $e");
-      setState(() {
-        _isLoading = false;
-        _hasError = true;
-      });
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _hasError = true;
+        });
+      }
     }
+  }
+
+  /// Refresca la carga hacia `http://<HOST_IP>:8000/dashboard`
+  void _refreshDashboard() {
+    _determineUrl();
+    if (_controller != null) {
+      setState(() {
+        _isLoading = true;
+        _hasError = false;
+      });
+      _controller!.loadRequest(Uri.parse(_targetUrl));
+    } else {
+      _initWebView();
+    }
+  }
+
+  void _showServerConfigDialog() {
+    final ipController = TextEditingController(text: ApiService.host);
+    final portController = TextEditingController(text: ApiService.port.toString());
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.surface,
+        title: const Text(
+          "Configuración de Servidor FastAPI",
+          style: TextStyle(color: AppTheme.goldImperial, fontSize: 16),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              "Dirección IP del host FastAPI:",
+              style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: ipController,
+              decoration: const InputDecoration(
+                labelText: "Host IP",
+                hintText: "ej. 192.168.120.159",
+              ),
+              style: const TextStyle(color: AppTheme.textPrimary),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: portController,
+              decoration: const InputDecoration(
+                labelText: "Puerto",
+                hintText: "8000",
+              ),
+              keyboardType: TextInputType.number,
+              style: const TextStyle(color: AppTheme.textPrimary),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text("Cancelar", style: TextStyle(color: AppTheme.textSecondary)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final newHost = ipController.text.trim();
+              final newPort = int.tryParse(portController.text.trim()) ?? 8000;
+              if (newHost.isNotEmpty) {
+                ApiService.setNetworkConfig(newHost, newPort);
+                _refreshDashboard();
+              }
+              Navigator.pop(ctx);
+            },
+            child: const Text("Conectar"),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -86,25 +161,34 @@ class _UserWebViewState extends State<UserWebView> {
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
-        title: const Row(
-          mainAxisSize: MainAxisSize.min,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Icon(Icons.shield_outlined, color: AppTheme.goldImperial, size: 20),
-            SizedBox(width: 8),
-            Text("Panel Personal de Usuario"),
+            const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.shield_outlined, color: AppTheme.goldImperial, size: 18),
+                SizedBox(width: 8),
+                Text("Panel Personal de Usuario", style: TextStyle(fontSize: 16)),
+              ],
+            ),
+            Text(
+              _targetUrl,
+              style: const TextStyle(color: AppTheme.textSecondary, fontSize: 10),
+              overflow: TextOverflow.ellipsis,
+            ),
           ],
         ),
         actions: [
           IconButton(
+            icon: const Icon(Icons.settings_ethernet),
+            tooltip: "Configurar IP del Host",
+            onPressed: _showServerConfigDialog,
+          ),
+          IconButton(
             icon: const Icon(Icons.refresh),
             tooltip: "Recargar Dashboard",
-            onPressed: () {
-              if (_controller != null) {
-                _controller!.reload();
-              } else {
-                _initWebView();
-              }
-            },
+            onPressed: _refreshDashboard,
           ),
         ],
       ),
@@ -206,11 +290,37 @@ class _UserWebViewState extends State<UserWebView> {
                     ],
                   ),
                   const SizedBox(height: 12),
+                  Text(
+                    "Conectando a: $_targetUrl",
+                    style: const TextStyle(color: AppTheme.goldLight, fontSize: 12),
+                  ),
+                  const SizedBox(height: 6),
                   const Text(
-                    "Interfaz Web embebida con protección activa de Honeypot y validación dual de IA (Transaccional SVM + NLP Phishing).",
+                    "Si el WebView no carga en el dispositivo físico, verifica que tu teléfono esté en la misma red Wi-Fi y pulsa 'Recargar' o cambia la IP del host.",
                     style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
                   ),
-                  const Divider(height: 32),
+                  const Divider(height: 28),
+
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _showServerConfigDialog,
+                          icon: const Icon(Icons.settings_ethernet, size: 16),
+                          label: const Text("Cambiar Host IP"),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: _refreshDashboard,
+                          icon: const Icon(Icons.refresh, size: 16),
+                          label: const Text("Reintentar"),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const Divider(height: 28),
 
                   // Campos nativos sincronizados con el dashboard
                   const Text("ID de Usuario:", style: TextStyle(color: AppTheme.textPrimary, fontSize: 12)),
@@ -263,14 +373,6 @@ class _UserWebViewState extends State<UserWebView> {
                         ),
                       ],
                     ),
-                  ),
-                  const SizedBox(height: 24),
-
-                  ElevatedButton(
-                    onPressed: () {
-                      _initWebView();
-                    },
-                    child: const Text("Reintentar Carga del Dashboard Web"),
                   ),
                 ],
               ),
