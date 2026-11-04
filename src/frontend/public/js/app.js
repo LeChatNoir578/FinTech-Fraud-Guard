@@ -28,7 +28,8 @@ document.addEventListener('DOMContentLoaded', () => {
         // 3. Hardening OWASP: Validación estática contra inyección SQL/Comandos
         const dangerousPattern = /(\b(SELECT|UPDATE|DELETE|INSERT|DROP|EXEC|UNION)\b)|(;|\||&&|`|\$|<|>)/i;
         if (dangerousPattern.test(safeData.description) || dangerousPattern.test(safeData.location)) {
-            alert("[ALERTA DE SEGURIDAD] Caracteres no permitidos detectados. Operación bloqueada.");
+            // Requisito 1: Alerta por Sanitización OWASP / Caracteres Prohibidos (Imperativo + First Conditional)
+            alert("[SECURITY ALERT] Invalid characters detected! Stop the input. If you include special symbols, the system will block your request immediately.");
             return;
         }
 
@@ -109,9 +110,15 @@ document.addEventListener('DOMContentLoaded', () => {
             // 5. Renderizado seguro en el DOM
             renderResults(combinedResult);
 
+            // Requisito 2: Alerta cuando la API detecte Alto Riesgo (Second Conditional)
+            if (combinedRiskLevel === 'Alto') {
+                alert("[CRITICAL RISK] If a threat actor attempted a phishing attack, Fraud Guard would isolate the transaction. Please review the input parameters!");
+            }
+
         } catch (error) {
-            console.error("Error conectando con la API:", error);
-            alert("Error al comunicar con la API de FinTech Fraud Guard: " + error.message);
+            console.error("Error conectando con la API o Base de Datos:", error);
+            // Requisito 3: Alerta cuando la base de datos falle o se pierda conexión (Imperativo)
+            alert("[SYSTEM NOTICE] Check your internet connection or verify the database status before submitting again.");
             updateUIState('reset');
         }
     });
@@ -156,7 +163,7 @@ function renderResults(data) {
     const alertBox = document.getElementById('englishAlert');
     if (data.triggerAlert) {
         alertBox.style.display = 'block';
-        alertBox.innerHTML = `<strong>Security Alert:</strong> If suspicious activity is detected, the system will flag the transaction for review and temporarily block the funds.`;
+        alertBox.innerHTML = `<strong>Security Alert:</strong> If a threat actor attempted a phishing attack, Fraud Guard would isolate the transaction. Please review the input parameters!`;
     } else {
         alertBox.style.display = 'none';
     }
