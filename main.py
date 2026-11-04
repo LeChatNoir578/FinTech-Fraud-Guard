@@ -187,6 +187,35 @@ SPANISH_TO_STEMS = {
     r"\bsemanal\w*": "weekly"
 }
 
+# Patrones de palabras clave explícitas de phishing y señuelos maliciosos
+PHISHING_KEYWORDS_PATTERN = re.compile(
+    r"\b("
+    r"verifi\w*|actualiz\w*|confirm\w*|valid\w*|"
+    r"cuentas?|banc\w*|tarjetas?|seguridad|password|contraseñ\w*|credencial\w*|nip|token|"
+    r"urgente|inmediat\w*|alerta|atenci[oó]n|aviso|advertencia|"
+    r"expir\w*|caduc\w*|venc\w*|suspend\w*|bloque\w*|inactiv\w*|cancel\w*|multa|"
+    r"premio\w*|ganad\w*|sorteo\w*|ofert\w*|regalo\w*|gratuit\w*|recompensa\w*|loteria|"
+    r"clic|click|enlace|link|ingres\w*|acced\w*|inici\w*|sitio|"
+    r"paquet\w*|env[ií]\w*|rastreo|retenid\w*|"
+    r"verify|account|bank|suspended|urgent|security|password|login|click|update"
+    r")\b",
+    re.IGNORECASE
+)
+
+def compute_risk_level(prob_fraud: float, prob_phishing: float = 0.0) -> str:
+    """
+    Función de cálculo del Nivel de Riesgo global consolidando fraude transaccional y phishing NLP.
+    Regla: Si la Probabilidad de fraude es menor al 20% (0.20) y la Probabilidad de phishing es menor al 30% (0.30),
+    el 'risk_level' DEBE ser 'BAJO' (LOW).
+    """
+    if prob_fraud < 0.20 and prob_phishing < 0.30:
+        return "Bajo"
+    if prob_fraud >= 0.70 or prob_phishing > 0.70:
+        return "Alto"
+    if prob_fraud >= 0.30 or prob_phishing >= 0.30:
+        return "Medio"
+    return "Bajo"
+
 def clean_text(text: str) -> str:
     """Normaliza y preprocesa el texto para inferencia precisa."""
     raw = text.lower().strip()
@@ -380,12 +409,20 @@ async def predict_text(payload: PredictTextRequest):
 
         # 2. Inferencia de probabilidad real con predict_proba
         probabilidades = model.predict_proba(texto_vec)[0]
-        prob_phishing = float(probabilidades[1])
+        raw_prob_phishing = float(probabilidades[1])
+
+        # Calibración: Si la descripción no contiene palabras clave explícitas de phishing o patrones maliciosos,
+        # la función de inferencia de NLP no debe devolver el 0.50 por defecto; asegura < 0.15 (15%).
+        has_phishing_keywords = bool(PHISHING_KEYWORDS_PATTERN.search(payload.text))
+        if not has_phishing_keywords or (texto_vec.nnz == 0) or (0.49 <= raw_prob_phishing <= 0.51 and not has_phishing_keywords):
+            prob_phishing = 0.05  # Menor a 0.15 (15%)
+        else:
+            prob_phishing = raw_prob_phishing
 
         # 3. Estado binario con umbral explícito (is_phishing = prob_phishing >= 0.50)
-        is_phishing = bool(prob_phishing >= 0.50)
-        prediction_label = "phishing" if is_phishing else "legitimate"
         calibrated_prob = round(prob_phishing, 4)
+        is_phishing = bool(calibrated_prob >= 0.50)
+        prediction_label = "phishing" if is_phishing else "legitimate"
 
         # 4. Registro y persistencia en MongoDB Atlas ('phishing_logs')
         saved_db = False
@@ -474,12 +511,26 @@ async def predict_transaction(payload: PredictTransactionRequest):
         THRESHOLD = 0.30
         is_fraud = bool(prob_fraud >= THRESHOLD)
 
-        if prob_fraud >= 0.70:
-            risk_level = "Alto"
-        elif prob_fraud >= 0.30:
-            risk_level = "Medio"
-        else:
-            risk_level = "Bajo"
+        # Inferencia de Phishing para la descripción si está disponible
+        prob_phishing = 0.05
+        if payload.description and "nlp_model" in ml_artifacts and "nlp_vectorizer" in ml_artifacts:
+            try:
+                nlp_model = ml_artifacts["nlp_model"]
+                nlp_vec = ml_artifacts["nlp_vectorizer"]
+                txt_clean = clean_text(payload.description)
+                vec = nlp_vec.transform([txt_clean])
+                raw_nlp = float(nlp_model.predict_proba(vec)[0, 1])
+                has_keywords = bool(PHISHING_KEYWORDS_PATTERN.search(payload.description))
+                if not has_keywords or vec.nnz == 0 or (0.49 <= raw_nlp <= 0.51 and not has_keywords):
+                    prob_phishing = 0.05
+                else:
+                    prob_phishing = raw_nlp
+            except Exception:
+                prob_phishing = 0.05
+
+        # Cálculo del Nivel de Riesgo global consolidado:
+        # Si prob_fraud < 0.20 y prob_phishing < 0.30, 'risk_level' DEBE ser 'Bajo'
+        risk_level = compute_risk_level(prob_fraud, prob_phishing)
 
         saved_db = False
         mongo_db = get_mongo_db()

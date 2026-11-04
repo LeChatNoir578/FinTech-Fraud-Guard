@@ -122,22 +122,29 @@ document.addEventListener('DOMContentLoaded', () => {
             const isFraud = Boolean(transactionRes.is_fraud);
             const isPhishing = Boolean(nlpRes.is_phishing);
             const nlpProbability = parseFloat(nlpRes.probability || 0);
-            const fraudProbability = (parseFloat(transactionRes.probability || 0) * 100).toFixed(1);
+            const fraudProbability = parseFloat(transactionRes.probability || 0);
+            const fraudProbabilityPercent = (fraudProbability * 100).toFixed(1);
             const nlpProbabilityPercent = (nlpProbability * 100).toFixed(1);
 
-            // Nivel de riesgo combinado consolidado
-            let combinedRiskLevel = transactionRes.risk_level || 'Bajo';
-            if (nlpProbability > 0.70 || (isPhishing && isFraud)) {
-                combinedRiskLevel = 'Alto';
-            } else if (isPhishing || combinedRiskLevel === 'Medio') {
-                combinedRiskLevel = 'Medio';
+            // Requisito 1: Cálculo del Nivel de Riesgo global consolidado
+            // Si la probabilidad de fraude es menor al 20% (< 0.20) y la de phishing es menor al 30% (< 0.30), DEBE ser "BAJO"
+            const globalRiskScore = Math.max(fraudProbability, nlpProbability);
+            let combinedRiskLevel = 'BAJO';
+
+            if (fraudProbability < 0.20 && nlpProbability < 0.30) {
+                combinedRiskLevel = 'BAJO';
+            } else if (fraudProbability >= 0.70 || nlpProbability > 0.70) {
+                combinedRiskLevel = 'ALTO';
+            } else if (globalRiskScore >= 0.30 || isPhishing || isFraud) {
+                combinedRiskLevel = 'MEDIO';
             } else {
-                combinedRiskLevel = 'Bajo';
+                combinedRiskLevel = 'BAJO';
             }
 
-            // Formateo del mensaje analítico de NLP
+            // Requisito 2: Solo muestra la caja de [ALERTA PHISHING] si la probabilidad de NLP es estrictamente mayor al 40% (> 0.40)
+            const isPhishingAlert = nlpProbability > 0.40;
             let nlpMessage = "";
-            if (nlpProbability > 0.70 || isPhishing) {
+            if (isPhishingAlert) {
                 nlpMessage = `[ALERTA PHISHING] Probabilidad: ${nlpProbabilityPercent}% — Patrón de ingeniería social detectado en la descripción.`;
             } else {
                 nlpMessage = `Texto verificado sin indicios de phishing (Riesgo estimado: ${nlpProbabilityPercent}%).`;
@@ -145,17 +152,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const combinedResult = {
                 riskLevel: combinedRiskLevel,
-                fraudProbability: fraudProbability,
+                globalRiskScore: globalRiskScore,
+                fraudProbability: fraudProbabilityPercent,
                 nlpProbability: nlpProbabilityPercent,
+                isPhishingAlert: isPhishingAlert,
                 nlpAnalysis: nlpMessage,
-                triggerAlert: combinedRiskLevel === 'Alto' || nlpProbability > 0.70
+                triggerAlert: combinedRiskLevel === 'ALTO' || nlpProbability > 0.70
             };
 
             // 5. Renderizado seguro en el DOM (#resultsSection)
             renderResults(combinedResult);
 
-            // Mejora 1: Calibración del Trigger para la Alerta Emergente (Second Conditional)
-            if (combinedRiskLevel === 'Alto' || nlpProbability > 0.70) {
+            // Alerta Emergente (Second Conditional) si el riesgo consolidado es ALTO o phishing > 70%
+            if (combinedRiskLevel === 'ALTO' || nlpProbability > 0.70) {
                 alert("[CRITICAL RISK] If a threat actor attempted a phishing attack, Fraud Guard would isolate the transaction. Please review the input parameters!");
             }
 
@@ -186,7 +195,13 @@ function updateUIState(state) {
         }
         if (fraudElem) fraudElem.textContent = "...";
         if (nlpProbElem) nlpProbElem.textContent = "...";
-        if (nlpResult) nlpResult.innerHTML = '<span class="placeholder-text">Analizando parámetros y contactando modelos de IA...</span>';
+        if (nlpResult) {
+            nlpResult.classList.remove('alert-phishing-box');
+            nlpResult.style.color = '';
+            nlpResult.style.borderColor = '';
+            nlpResult.style.backgroundColor = '';
+            nlpResult.innerHTML = '<span class="placeholder-text">Analizando parámetros y contactando modelos de IA...</span>';
+        }
         if (englishAlert) englishAlert.style.display = 'none';
 
         if (lblBajo) lblBajo.classList.remove('active');
@@ -199,7 +214,13 @@ function updateUIState(state) {
         }
         if (fraudElem) fraudElem.textContent = "--";
         if (nlpProbElem) nlpProbElem.textContent = "--";
-        if (nlpResult) nlpResult.innerHTML = '<span class="placeholder-text">Esperando ejecución del modelo...</span>';
+        if (nlpResult) {
+            nlpResult.classList.remove('alert-phishing-box');
+            nlpResult.style.color = '';
+            nlpResult.style.borderColor = '';
+            nlpResult.style.backgroundColor = '';
+            nlpResult.innerHTML = '<span class="placeholder-text">Esperando ejecución del modelo...</span>';
+        }
         if (englishAlert) englishAlert.style.display = 'none';
 
         if (lblBajo) lblBajo.classList.remove('active');
@@ -217,17 +238,19 @@ function updateUIState(state) {
 
 function renderResults(data) {
     // 1. Elemento del nivel de riesgo (#riskLevel) con clases de color
+    // Requisito 2: "Asigna la clase '.text-success' y el texto 'BAJO' cuando el riesgo global sea menor al 30%."
     const riskLevelElem = document.getElementById('riskLevel');
     if (riskLevelElem) {
-        const levelUpper = data.riskLevel.toUpperCase();
-        riskLevelElem.textContent = levelUpper;
         riskLevelElem.classList.remove('text-success', 'text-warning', 'text-danger');
 
-        if (levelUpper === 'BAJO') {
+        if (data.globalRiskScore < 0.30 || data.riskLevel.toUpperCase() === 'BAJO') {
+            riskLevelElem.textContent = "BAJO";
             riskLevelElem.classList.add('text-success'); // Verde
-        } else if (levelUpper === 'MEDIO') {
+        } else if (data.riskLevel.toUpperCase() === 'MEDIO' || (data.globalRiskScore >= 0.30 && data.globalRiskScore < 0.70)) {
+            riskLevelElem.textContent = "MEDIO";
             riskLevelElem.classList.add('text-warning'); // Amarillo / Naranja
-        } else if (levelUpper === 'ALTO') {
+        } else {
+            riskLevelElem.textContent = "ALTO";
             riskLevelElem.classList.add('text-danger');  // Rojo
         }
     }
@@ -252,16 +275,27 @@ function renderResults(data) {
     if (lblMedio) lblMedio.classList.remove('active');
     if (lblAlto) lblAlto.classList.remove('active');
 
-    const levelStr = data.riskLevel.toUpperCase();
-    if (levelStr === 'BAJO' && lblBajo) lblBajo.classList.add('active');
-    else if (levelStr === 'MEDIO' && lblMedio) lblMedio.classList.add('active');
-    else if (levelStr === 'ALTO' && lblAlto) lblAlto.classList.add('active');
+    const activeRisk = riskLevelElem ? riskLevelElem.textContent : data.riskLevel.toUpperCase();
+    if (activeRisk === 'BAJO' && lblBajo) lblBajo.classList.add('active');
+    else if (activeRisk === 'MEDIO' && lblMedio) lblMedio.classList.add('active');
+    else if (activeRisk === 'ALTO' && lblAlto) lblAlto.classList.add('active');
 
-    // 4. Inserción de resultado descriptivo de NLP
+    // 4. Inserción de resultado descriptivo de NLP y visualización de caja de alerta
+    // Requisito 2: "Solo muestra la caja de [ALERTA PHISHING] si la probabilidad de NLP es estrictamente mayor al 40%."
     const nlpBox = document.getElementById('nlpResult');
     if (nlpBox) {
         nlpBox.textContent = data.nlpAnalysis;
-        nlpBox.style.color = data.triggerAlert ? 'var(--high-risk)' : 'var(--text-main)';
+        if (data.isPhishingAlert) {
+            nlpBox.classList.add('alert-phishing-box');
+            nlpBox.style.color = 'var(--high-risk)';
+            nlpBox.style.borderColor = 'var(--high-risk)';
+            nlpBox.style.backgroundColor = '#fef2f2';
+        } else {
+            nlpBox.classList.remove('alert-phishing-box');
+            nlpBox.style.color = 'var(--text-main)';
+            nlpBox.style.borderColor = 'var(--border-color)';
+            nlpBox.style.backgroundColor = '#ffffff';
+        }
     }
 
     // 5. Despliegue de la Alerta Ejecutiva

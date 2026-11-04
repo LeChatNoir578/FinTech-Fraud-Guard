@@ -177,6 +177,13 @@ button:hover {
     min-height: 50px;
     font-size: 0.95rem;
     line-height: 1.5;
+    transition: all 0.3s ease;
+}
+
+.result-box.alert-phishing-box {
+    background-color: #fef2f2 !important;
+    border-color: var(--high-risk) !important;
+    color: var(--high-risk) !important;
 }
 
 .placeholder-text {
