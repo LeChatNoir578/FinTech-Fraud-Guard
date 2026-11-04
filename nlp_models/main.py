@@ -81,6 +81,33 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# --- Mapeo de Términos / Normalización para el Vectorizador TF-IDF ---
+SPANISH_TO_STEMS = {
+    r"\bverifi\w*": "verify",
+    r"\bcuentas?\b": "account",
+    r"\bseguridad\b": "security",
+    r"\bdispositiv\w*": "devic",
+    r"\b(expir\w*|caduc\w*|venc\w*)": "expir",
+    r"\bsuscripci\w*": "subscription",
+    r"\b(ofert\w*|premio\w*)": "offer",
+    r"\b(paquet\w*|env[ií]\w*)": "parcel shipp",
+    r"\b(urgente|inmediat\w*|alerta)": "act limit verify",
+    r"\b(gracias|agradezc\w*)": "thanks",
+    r"\badjunt\w*": "attach",
+    r"\b(revis\w*|favor)\b": "review ple",
+    r"\b(saludos|cordiales|atentamente)": "regards",
+    r"\bequipo\b": "team",
+    r"\bfacturas?\b": "invoic",
+    r"\bsemanal\w*": "weekly"
+}
+
+def clean_text(text: str) -> str:
+    """Normaliza y preprocesa el texto para inferencia precisa."""
+    raw = text.lower().strip()
+    for pattern, repl in SPANISH_TO_STEMS.items():
+        raw = re.sub(pattern, repl, raw)
+    return re.sub(r"[^\w\s]", "", raw)
+
 # --- Esquemas Pydantic ---
 class PredictRequest(BaseModel):
     text: str = Field(
@@ -100,8 +127,8 @@ class PredictRequest(BaseModel):
 class PredictResponse(BaseModel):
     text: str
     prediction: str
-    probability: float
     is_phishing: bool
+    probability: float
     saved_in_database: bool = False
 
 # --- Endpoints ---
@@ -121,61 +148,43 @@ async def predict_phishing(payload: PredictRequest):
         model = ml_artifacts["model"]
         vectorizer = ml_artifacts["vectorizer"]
 
-        # 1. Preprocesamiento del texto de entrada
-        raw_text = payload.text.lower().strip()
-        processed_text = re.sub(r"[^\w\s]", "", raw_text)
+        # 1. Transformación TF-IDF sobre el texto de entrada limpio
+        texto_limpio = clean_text(payload.text)
+        texto_vec = vectorizer.transform([texto_limpio])
 
-        # 2. Vectorización TF-IDF
-        text_vectorized = vectorizer.transform([processed_text])
+        # 2. Inferencia de probabilidad real con predict_proba
+        probabilidades = model.predict_proba(texto_vec)[0]
+        prob_phishing = float(probabilidades[1])
 
-        # 3. Predicción directa del modelo
-        raw_pred = model.predict(text_vectorized)[0]
+        # 3. Estado binario con umbral explícito (is_phishing = prob_phishing >= 0.50)
+        is_phishing = bool(prob_phishing >= 0.50)
+        prediction_label = "phishing" if is_phishing else "legitimate"
+        calibrated_prob = round(prob_phishing, 4)
 
-        # 4. Inferencia precisa de probabilidad para phishing
-        if hasattr(model, "predict_proba"):
-            probs = model.predict_proba(text_vectorized)[0]
-            classes = list(model.classes_)
-
-            if 1 in classes:
-                phishing_idx = classes.index(1)
-            elif "phishing" in classes:
-                phishing_idx = classes.index("phishing")
-            elif "Phishing" in classes:
-                phishing_idx = classes.index("Phishing")
-            else:
-                phishing_idx = 1 if len(classes) > 1 else 0
-
-            prob_phishing = float(probs[phishing_idx])
-        else:
-            prob_phishing = 1.0 if raw_pred in [1, "phishing", "Phishing"] else 0.0
-
-        is_phishing = raw_pred in [1, "phishing", "Phishing"] or prob_phishing >= 0.5
-        label = "phishing" if is_phishing else "normal"
-        final_prob = prob_phishing if is_phishing else (1.0 - prob_phishing)
+        # 4. Registro y persistencia en MongoDB Atlas ('phishing_logs')
         saved_db = False
-
-        # 5. Registro automático en MongoDB Atlas ('phishing_logs')
         mongo_db = ml_artifacts.get("mongo_db")
         if mongo_db is not None:
             try:
                 log_entry = {
                     "text": payload.text,
-                    "prediction": label,
+                    "prediction": prediction_label,
                     "is_phishing": is_phishing,
-                    "probability": round(final_prob, 4),
+                    "probability": calibrated_prob,
                     "timestamp": datetime.now(timezone.utc).isoformat()
                 }
                 mongo_db["phishing_logs"].insert_one(log_entry)
                 saved_db = True
-                print(f"📝 [MongoDB] Log de phishing registrado en colección 'phishing_logs'")
+                print(f"📝 [MongoDB] Log de phishing registrado en colección 'phishing_logs': {prediction_label} (p={calibrated_prob})")
             except Exception as e:
                 print(f"⚠️ [MongoDB] Error registrando log: {e}")
 
+        # 5. Formato de salida estandarizado en el JSON
         return PredictResponse(
             text=payload.text,
-            prediction=label,
-            probability=round(final_prob, 4),
+            prediction=prediction_label,
             is_phishing=is_phishing,
+            probability=calibrated_prob,
             saved_in_database=saved_db
         )
 
