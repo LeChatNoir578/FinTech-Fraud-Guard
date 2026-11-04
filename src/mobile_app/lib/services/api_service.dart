@@ -90,10 +90,34 @@ class BatchUploadResponse {
   }
 }
 
+class TextPredictionResult {
+  final String text;
+  final String prediction;
+  final bool isPhishing;
+  final double phishingProbability;
+  final double fraudProbability;
+  final String riskLevel;
+  final bool isFraud;
+  final String englishAlert;
+  final bool isLocalFallback;
+
+  TextPredictionResult({
+    required this.text,
+    required this.prediction,
+    required this.isPhishing,
+    required this.phishingProbability,
+    required this.fraudProbability,
+    required this.riskLevel,
+    required this.isFraud,
+    required this.englishAlert,
+    this.isLocalFallback = false,
+  });
+}
+
 class ApiService {
   // Configuración de red para dispositivo físico Android
   // Permite configurar la dirección IP de la red local (host) en lugar de 'localhost' o '127.0.0.1'
-  static String host = "192.168.120.159";
+  static String host = "192.168.100.23";
   static int port = 8000;
 
   /// Permite actualizar dinámicamente la IP del servidor FastAPI desde la app
@@ -110,6 +134,126 @@ class ApiService {
       return "http://localhost:$port";
     }
     return "http://$host:$port";
+  }
+
+  /// Evalúa un mensaje o texto sospechoso contra phishing (NLP) y fraude (SVM)
+  static Future<TextPredictionResult> evaluateSuspiciousMessage({
+    required String text,
+    double amount = 150.0,
+    String userId = "USR-MOBILE",
+  }) async {
+    try {
+      // 1. Inferencia NLP (/predict/text)
+      double phishingProb = 5.0;
+      bool isPhishing = false;
+      String prediction = "legitimate";
+
+      final textUri = Uri.parse('$baseUrl/predict/text');
+      final textResp = await http.post(
+        textUri,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'text': text}),
+      ).timeout(const Duration(seconds: 4));
+
+      if (textResp.statusCode == 200) {
+        final data = jsonDecode(textResp.body);
+        phishingProb = ((data['probability'] as num?)?.toDouble() ?? 0.05) * 100.0;
+        isPhishing = data['is_phishing'] == true;
+        prediction = data['prediction']?.toString() ?? "legitimate";
+      }
+
+      // 2. Inferencia Transaccional SVM (/predict/transaction)
+      double fraudProb = 0.1;
+      bool isFraud = false;
+      String riskLevel = "BAJO";
+
+      final txnUri = Uri.parse('$baseUrl/predict/transaction');
+      final txnResp = await http.post(
+        txnUri,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'amount': amount,
+          'user_id': userId,
+          'description': text,
+        }),
+      ).timeout(const Duration(seconds: 4));
+
+      if (txnResp.statusCode == 200) {
+        final data = jsonDecode(txnResp.body);
+        fraudProb = ((data['probability'] as num?)?.toDouble() ?? 0.001) * 100.0;
+        isFraud = data['is_fraud'] == true;
+        riskLevel = data['risk_level']?.toString().toUpperCase() ?? "BAJO";
+      } else {
+        if (fraudProb < 20.0 && phishingProb < 30.0) {
+          riskLevel = "BAJO";
+        } else if (fraudProb >= 70.0 || phishingProb > 70.0) {
+          riskLevel = "ALTO";
+        } else {
+          riskLevel = "MEDIO";
+        }
+      }
+
+      final alert = isPhishing || fraudProb >= 30.0
+          ? 'If a threat actor attempted a phishing attack, Fraud Guard would isolate the transaction. Please review the input parameters!'
+          : 'Transaction parameters and message pattern appear secure.';
+
+      return TextPredictionResult(
+        text: text,
+        prediction: prediction,
+        isPhishing: isPhishing,
+        phishingProbability: phishingProb,
+        fraudProbability: fraudProb,
+        riskLevel: riskLevel,
+        isFraud: isFraud,
+        englishAlert: alert,
+        isLocalFallback: false,
+      );
+    } catch (e) {
+      // Analizador de respaldo con reglas exactas de calibración (offline / error de red)
+      final lower = text.toLowerCase();
+      final hasKeywords = lower.contains("cuenta") ||
+          lower.contains("banco") ||
+          lower.contains("tarjeta") ||
+          lower.contains("bloquead") ||
+          lower.contains("suspend") ||
+          lower.contains("urgente") ||
+          lower.contains("verify") ||
+          lower.contains("password") ||
+          lower.contains("inmediat") ||
+          lower.contains("premio") ||
+          lower.contains("link") ||
+          lower.contains("enlace");
+
+      final double phishingProb = hasKeywords ? 92.5 : 5.0;
+      final bool isPhishing = phishingProb >= 50.0;
+      final double fraudProb = amount > 5000 ? 75.0 : 0.1;
+      final bool isFraud = fraudProb >= 30.0;
+
+      String riskLevel = "BAJO";
+      if (fraudProb < 20.0 && phishingProb < 30.0) {
+        riskLevel = "BAJO";
+      } else if (fraudProb >= 70.0 || phishingProb > 70.0) {
+        riskLevel = "ALTO";
+      } else {
+        riskLevel = "MEDIO";
+      }
+
+      final alert = isPhishing || isFraud
+          ? 'If a threat actor attempted a phishing attack, Fraud Guard would isolate the transaction. Please review the input parameters!'
+          : 'Transaction parameters and message pattern appear secure.';
+
+      return TextPredictionResult(
+        text: text,
+        prediction: isPhishing ? "phishing" : "legitimate",
+        isPhishing: isPhishing,
+        phishingProbability: phishingProb,
+        fraudProbability: fraudProb,
+        riskLevel: riskLevel,
+        isFraud: isFraud,
+        englishAlert: alert,
+        isLocalFallback: true,
+      );
+    }
   }
 
   /// Carga masiva de transacciones mediante multipart/form-data
