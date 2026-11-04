@@ -29,8 +29,19 @@ package-lock.json
 .vscode/
 .idea/
 
-# Binarios / Modelos pesados (permitiendo explícitamente los esenciales de NLP)
+# Respaldos offline
+*.bundle
+
+# Binarios / Modelos pesados (permitiendo explícitamente los esenciales de NLP y ML)
 *.pkl
 *.joblib
 !nlp_models/phishing_model_v1.joblib
 !nlp_models/tfidf_vectorizer_v1.joblib
+!models/saved/scaler.joblib
+!models/saved/svm_model.joblib
+!models/saved/knn_model.joblib
+!models/saved/red_model.joblib
+!ai_models/saved/scaler.joblib
+!ai_models/saved/svm_model.joblib
+!ai_models/saved/knn_model.joblib
+!ai_models/saved/red_model.joblib
