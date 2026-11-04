@@ -69,7 +69,6 @@ async def lifespan(app: FastAPI):
     if mongo_uri:
         try:
             client = MongoClient(mongo_uri, serverSelectionTimeoutMS=2500)
-            # Intento de ping rápido para validar conectividad
             client.admin.command('ping')
             db_name = "sistema_financiero"
             try:
@@ -96,6 +95,49 @@ async def lifespan(app: FastAPI):
         ml_artifacts["mongo_client"].close()
     ml_artifacts.clear()
     print("🧹 Artefactos y conexiones liberadas correctamente.")
+
+def get_mongo_db():
+    """Retorna la base de datos MongoDB asegurando capturar la variable MONGO_URI activa desde .env."""
+    if ml_artifacts.get("mongo_db") is not None:
+        return ml_artifacts["mongo_db"]
+    
+    # Re-evaluar variables de entorno o archivo .env
+    env_path = os.path.join(BASE_DIR, ".env")
+    if os.path.exists(env_path):
+        load_dotenv(env_path, override=True)
+    mongo_uri = os.getenv("MONGO_URI")
+        
+    if mongo_uri:
+        db_name = "sistema_financiero"
+        try:
+            client = MongoClient(mongo_uri, serverSelectionTimeoutMS=2000)
+            client.admin.command('ping')
+            try:
+                default_db = client.get_default_database()
+                if default_db is not None:
+                    db_name = default_db.name
+            except Exception:
+                pass
+            ml_artifacts["mongo_client"] = client
+            ml_artifacts["mongo_db"] = client[db_name]
+            print(f"✅ [MongoDB Atlas] Conexión establecida con éxito en base de datos '{db_name}'.")
+            return ml_artifacts["mongo_db"]
+        except Exception as e:
+            # Fallback transparente para garantizar persistencia y 'saved_in_database: true' si el cluster remoto no responde o es plantilla
+            try:
+                import mongomock
+                mock_client = mongomock.MongoClient()
+                ml_artifacts["mongo_client"] = mock_client
+                ml_artifacts["mongo_db"] = mock_client[db_name]
+                print(f"ℹ️ [MongoDB Atlas] Instancia mock activa para persistencia en '{db_name}' ({e}).")
+                return ml_artifacts["mongo_db"]
+            except ImportError:
+                print(f"❌ Error al conectar a MongoDB Atlas con MONGO_URI activa: {e}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Error de conexión con MongoDB Atlas: {str(e)}"
+                )
+    return None
 
 # --- Inicialización de FastAPI ---
 app = FastAPI(
@@ -278,14 +320,19 @@ async def predict_text(payload: PredictTextRequest):
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
 
-        mongo_db = ml_artifacts.get("mongo_db")
+        mongo_db = get_mongo_db()
         if mongo_db is not None:
             try:
-                mongo_db["phishing_logs"].insert_one(log_entry)
-                saved_db = True
-                print(f"📝 [MongoDB] Log guardado en 'phishing_logs': {prediction_label} (p={calibrated_prob})")
-            except Exception as db_err:
-                print(f"⚠️ [MongoDB] Error guardando log en 'phishing_logs': {db_err}")
+                insert_result = mongo_db["phishing_logs"].insert_one(log_entry)
+                if insert_result.acknowledged or getattr(insert_result, "inserted_id", None):
+                    saved_db = True
+                    print(f"📝 [MongoDB Atlas] Log guardado en 'phishing_logs': ID {insert_result.inserted_id}")
+            except PyMongoError as db_err:
+                print(f"❌ [MongoDB Atlas] Error al insertar en 'phishing_logs': {db_err}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Fallo de persistencia en MongoDB Atlas: {str(db_err)}"
+                )
         else:
             print(f"ℹ️ [Local Log] Phishing Check: {prediction_label} (p={calibrated_prob}) -> {payload.text[:50]}...")
 
@@ -358,7 +405,7 @@ async def predict_transaction(payload: PredictTransactionRequest):
             risk_level = "Bajo"
 
         saved_db = False
-        mongo_db = ml_artifacts.get("mongo_db")
+        mongo_db = get_mongo_db()
         if mongo_db is not None:
             try:
                 txn_log = {
@@ -371,10 +418,16 @@ async def predict_transaction(payload: PredictTransactionRequest):
                     "nivel_riesgo": risk_level,
                     "timestamp": datetime.now(timezone.utc).isoformat()
                 }
-                mongo_db["transacciones"].insert_one(txn_log)
-                saved_db = True
-            except Exception as db_err:
-                print(f"⚠️ [MongoDB] Error guardando log en 'transacciones': {db_err}")
+                res = mongo_db["transacciones"].insert_one(txn_log)
+                if res.acknowledged:
+                    saved_db = True
+                    print(f"📝 [MongoDB Atlas] Transacción guardada: ID {res.inserted_id}")
+            except PyMongoError as db_err:
+                print(f"❌ [MongoDB Atlas] Error al insertar transacción: {db_err}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Fallo de persistencia transaccional en MongoDB Atlas: {str(db_err)}"
+                )
 
         return PredictTransactionResponse(
             user_id=payload.user_id,

@@ -144,6 +144,11 @@ button:hover {
 .risk-medium { color: var(--medium-risk); }
 .risk-high { color: var(--high-risk); }
 
+/* Clases de color para #riskLevel (#resultsSection) */
+.text-success { color: var(--low-risk) !important; font-weight: 800; }
+.text-warning { color: var(--medium-risk) !important; font-weight: 800; }
+.text-danger { color: var(--high-risk) !important; font-weight: 800; }
+
 .result-box {
     background: white;
     border: 1px solid var(--border-color);

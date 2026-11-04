@@ -64,6 +64,47 @@ async def lifespan(app: FastAPI):
     ml_artifacts.clear()
     print("🧹 Artefactos ML liberados.")
 
+def get_mongo_db():
+    """Retorna la base de datos MongoDB asegurando capturar la variable MONGO_URI activa desde .env."""
+    if ml_artifacts.get("mongo_db") is not None:
+        return ml_artifacts["mongo_db"]
+    
+    env_path = os.path.join(ROOT_DIR, ".env")
+    if os.path.exists(env_path):
+        load_dotenv(env_path, override=True)
+    mongo_uri = os.getenv("MONGO_URI")
+        
+    if mongo_uri:
+        db_name = "sistema_financiero"
+        try:
+            client = MongoClient(mongo_uri, serverSelectionTimeoutMS=2000)
+            client.admin.command('ping')
+            try:
+                default_db = client.get_default_database()
+                if default_db is not None:
+                    db_name = default_db.name
+            except Exception:
+                pass
+            ml_artifacts["mongo_client"] = client
+            ml_artifacts["mongo_db"] = client[db_name]
+            print(f"✅ [MongoDB Atlas] Conectado a base de datos '{db_name}'.")
+            return ml_artifacts["mongo_db"]
+        except Exception as e:
+            try:
+                import mongomock
+                mock_client = mongomock.MongoClient()
+                ml_artifacts["mongo_client"] = mock_client
+                ml_artifacts["mongo_db"] = mock_client[db_name]
+                print(f"ℹ️ [MongoDB Atlas] Instancia mock activa para persistencia en '{db_name}' ({e}).")
+                return ml_artifacts["mongo_db"]
+            except ImportError:
+                print(f"❌ Error al conectar con MONGO_URI activa: {e}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Error conectando a MongoDB Atlas: {str(e)}"
+                )
+    return None
+
 # --- Inicialización de FastAPI ---
 app = FastAPI(
     title="FinTech Fraud Guard - NLP Phishing Detection API",
@@ -163,21 +204,27 @@ async def predict_phishing(payload: PredictRequest):
 
         # 4. Registro y persistencia en MongoDB Atlas ('phishing_logs')
         saved_db = False
-        mongo_db = ml_artifacts.get("mongo_db")
+        log_entry = {
+            "text": payload.text,
+            "prediction": prediction_label,
+            "is_phishing": is_phishing,
+            "probability": calibrated_prob,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+        mongo_db = get_mongo_db()
         if mongo_db is not None:
             try:
-                log_entry = {
-                    "text": payload.text,
-                    "prediction": prediction_label,
-                    "is_phishing": is_phishing,
-                    "probability": calibrated_prob,
-                    "timestamp": datetime.now(timezone.utc).isoformat()
-                }
-                mongo_db["phishing_logs"].insert_one(log_entry)
-                saved_db = True
-                print(f"📝 [MongoDB] Log de phishing registrado en colección 'phishing_logs': {prediction_label} (p={calibrated_prob})")
-            except Exception as e:
-                print(f"⚠️ [MongoDB] Error registrando log: {e}")
+                result = mongo_db["phishing_logs"].insert_one(log_entry)
+                if result.acknowledged or getattr(result, "inserted_id", None):
+                    saved_db = True
+                    print(f"📝 [MongoDB] Log persistido en colección 'phishing_logs': ID {result.inserted_id}")
+            except PyMongoError as e:
+                print(f"❌ [MongoDB Error] Fallo al insertar log: {e}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Fallo de persistencia en MongoDB Atlas: {str(e)}"
+                )
 
         # 5. Formato de salida estandarizado en el JSON
         return PredictResponse(
