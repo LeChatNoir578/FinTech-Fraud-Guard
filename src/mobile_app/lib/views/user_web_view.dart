@@ -20,12 +20,10 @@ class _UserWebViewState extends State<UserWebView> with SingleTickerProviderStat
   Timer? _loadTimeoutTimer;
 
   // Controladores y estado del Formulario Nativo (Requisito 3)
-  final _messageController = TextEditingController(
-    text: "Estimado cliente, su cuenta ha sido suspendida por seguridad. Ingrese de inmediato a este enlace para verificar sus credenciales.",
-  );
-  final _amountController = TextEditingController(text: "150.00");
-  final _userIdController = TextEditingController(text: "USR-9082");
-  final _honeypotController = TextEditingController();
+  final _messageController = TextEditingController(text: "");
+  final _amountController = TextEditingController(text: "");
+  final _userIdController = TextEditingController(text: "");
+  final _honeypotController = TextEditingController(text: "");
 
   bool _isEvaluating = false;
   TextPredictionResult? _evaluationResult;
@@ -36,8 +34,6 @@ class _UserWebViewState extends State<UserWebView> with SingleTickerProviderStat
     _tabController = TabController(length: 2, vsync: this);
     _determineUrl();
     _initWebView();
-    // Ejecutar una evaluación inicial nativa para que la pantalla nunca esté vacía
-    _evaluateMessage();
   }
 
   @override
@@ -406,7 +402,7 @@ class _UserWebViewState extends State<UserWebView> with SingleTickerProviderStat
                         maxLines: 3,
                         style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13),
                         decoration: InputDecoration(
-                          hintText: "Pega aquí el mensaje sospechoso recibido por SMS, WhatsApp o correo...",
+                          hintText: "Ingresa el texto o mensaje a evaluar...",
                           hintStyle: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
                           filled: true,
                           fillColor: AppTheme.surfaceLight,
@@ -419,41 +415,6 @@ class _UserWebViewState extends State<UserWebView> with SingleTickerProviderStat
                             borderSide: const BorderSide(color: AppTheme.goldImperial),
                           ),
                         ),
-                      ),
-                      const SizedBox(height: 10),
-
-                      // Botones rápidos de prueba
-                      Wrap(
-                        spacing: 8,
-                        children: [
-                          ActionChip(
-                            label: const Text("SMS Phishing", style: TextStyle(fontSize: 11)),
-                            backgroundColor: AppTheme.surfaceLight,
-                            onPressed: () {
-                              _messageController.text = "Estimado cliente, su cuenta ha sido suspendida. Ingrese a http://banco-seguro.com para verificar sus credenciales.";
-                              _amountController.text = "12500.00";
-                              _evaluateMessage();
-                            },
-                          ),
-                          ActionChip(
-                            label: const Text("Premio Ganador", style: TextStyle(fontSize: 11)),
-                            backgroundColor: AppTheme.surfaceLight,
-                            onPressed: () {
-                              _messageController.text = "¡Felicidades! Ha ganado un premio en efectivo. Haga clic aquí de inmediato para confirmar su tarjeta.";
-                              _amountController.text = "8500.00";
-                              _evaluateMessage();
-                            },
-                          ),
-                          ActionChip(
-                            label: const Text("Mensaje Legítimo", style: TextStyle(fontSize: 11)),
-                            backgroundColor: AppTheme.surfaceLight,
-                            onPressed: () {
-                              _messageController.text = "Pago ordinario de colegiatura mensual escolar.";
-                              _amountController.text = "150.00";
-                              _evaluateMessage();
-                            },
-                          ),
-                        ],
                       ),
                       const SizedBox(height: 14),
 
@@ -472,6 +433,8 @@ class _UserWebViewState extends State<UserWebView> with SingleTickerProviderStat
                                   style: const TextStyle(color: AppTheme.textPrimary, fontSize: 12),
                                   decoration: InputDecoration(
                                     prefixIcon: const Icon(Icons.attach_money, size: 16),
+                                    hintText: "0.00",
+                                    hintStyle: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
                                     filled: true,
                                     fillColor: AppTheme.surfaceLight,
                                     contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -493,6 +456,8 @@ class _UserWebViewState extends State<UserWebView> with SingleTickerProviderStat
                                   style: const TextStyle(color: AppTheme.textPrimary, fontSize: 12),
                                   decoration: InputDecoration(
                                     prefixIcon: const Icon(Icons.person_outline, size: 16),
+                                    hintText: "Ej. USR-9082",
+                                    hintStyle: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
                                     filled: true,
                                     fillColor: AppTheme.surfaceLight,
                                     contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -617,6 +582,27 @@ class _UserWebViewState extends State<UserWebView> with SingleTickerProviderStat
                         ),
                       ],
                     ),
+                  ),
+                ),
+              ] else ...[
+                Container(
+                  padding: const EdgeInsets.all(18),
+                  decoration: BoxDecoration(
+                    color: AppTheme.surface,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: AppTheme.borderGold),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(Icons.info_outline, color: AppTheme.goldImperial, size: 24),
+                      SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          "Ingresa el texto o mensaje a evaluar y pulsa 'Evaluar Fraude' para analizar el nivel de riesgo en tiempo real.",
+                          style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
