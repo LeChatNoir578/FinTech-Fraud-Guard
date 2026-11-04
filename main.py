@@ -1,10 +1,12 @@
 import os
 import re
+import io
+import json
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
-from fastapi import FastAPI, HTTPException, status, Request
+from fastapi import FastAPI, HTTPException, status, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
@@ -346,6 +348,7 @@ async def root():
             "dashboard_ui": "/dashboard",
             "honeypot_admin_login": "/api/v1/admin/login",
             "honeypot_debug_db": "/api/v1/debug-db",
+            "bank_upload_batch": "/api/v1/bank/upload-batch",
             "swagger_docs": "/docs"
         }
     }
@@ -386,6 +389,145 @@ async def honeypot_debug_db(request: Request):
         message="Unauthorized access attempt logged into honeypot_events",
         saved_in_database=True
     )
+
+# --- Endpoint para Entidades Bancarias: Procesamiento de Lotes Masivos ---
+
+@app.post("/api/v1/bank/upload-batch", tags=["Bank Batch Processing"])
+async def upload_bank_batch(file: UploadFile = File(...)):
+    """
+    Endpoint para entidades bancarias: Carga masiva de transacciones (CSV, JSON, Excel).
+    Evalúa cada registro con IA transaccional y NLP, retornando estadísticas consolidadas.
+    """
+    filename = file.filename or "batch_data.csv"
+    contents = await file.read()
+    
+    rows = []
+    try:
+        if filename.endswith(".json") or file.content_type == "application/json":
+            data = json.loads(contents.decode("utf-8", errors="replace"))
+            if isinstance(data, list):
+                rows = data
+            elif isinstance(data, dict) and "transactions" in data:
+                rows = data["transactions"]
+            else:
+                rows = [data]
+        elif filename.endswith((".xlsx", ".xls")):
+            import pandas as pd
+            df = pd.read_excel(io.BytesIO(contents))
+            rows = df.to_dict(orient="records")
+        else:
+            # CSV por defecto
+            import csv
+            reader = csv.DictReader(io.StringIO(contents.decode("utf-8", errors="replace")))
+            rows = list(reader)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Formato de archivo inválido o ilegible: {str(e)}"
+        )
+
+    if not rows:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El archivo proporcionado no contiene transacciones válidas."
+        )
+
+    # Inferencia en lote
+    model_svm = ml_artifacts.get("transaction_model")
+    scaler = ml_artifacts.get("transaction_scaler")
+    nlp_model = ml_artifacts.get("nlp_model")
+    nlp_vec = ml_artifacts.get("nlp_vectorizer")
+
+    results = []
+    low_count = 0
+    med_count = 0
+    high_count = 0
+
+    for idx, row in enumerate(rows):
+        txn_id = row.get("id") or row.get("transaction_id") or f"TXN-{idx+1:04d}"
+        user_id = str(row.get("user_id") or row.get("userId") or f"USR-{1000+idx}")
+        try:
+            amt = float(row.get("amount") or row.get("monto") or 0.0)
+        except Exception:
+            amt = 0.0
+        desc = str(row.get("description") or row.get("descripcion") or "Transferencia bancaria")
+        loc = str(row.get("location") or row.get("ubicacion") or "CDMX")
+
+        # 1. IA Transaccional
+        prob_fraud = 0.0001
+        if model_svm and scaler:
+            try:
+                v1 = float(row.get("v1_feature", 0.0)) if "v1_feature" in row else (3.2 if amt > 10000 else (1.8 if amt > 5000 else 0.0))
+                v2 = float(row.get("v2_feature", 0.0)) if "v2_feature" in row else (-2.6 if amt > 10000 else (-1.2 if amt > 5000 else 0.0))
+                time_step = int(row.get("time_step", 50))
+                df_row = pd.DataFrame([{"amount": amt, "time_step": time_step, "v1_feature": v1, "v2_feature": v2}])
+                scaled = scaler.transform(df_row)
+                prob_fraud = float(model_svm.predict_proba(scaled)[0, 1])
+            except Exception:
+                prob_fraud = 0.05
+
+        # 2. NLP Phishing
+        prob_phishing = 0.05
+        if nlp_model and nlp_vec and desc:
+            try:
+                cleaned = clean_text(desc)
+                vec = nlp_vec.transform([cleaned])
+                raw_nlp = float(nlp_model.predict_proba(vec)[0, 1])
+                has_signals = bool(PHISHING_KEYWORDS_PATTERN.search(desc))
+                if not has_signals or vec.nnz == 0 or (0.49 <= raw_nlp <= 0.51 and not has_signals):
+                    prob_phishing = 0.05
+                else:
+                    prob_phishing = raw_nlp
+            except Exception:
+                prob_phishing = 0.05
+
+        # 3. Nivel de riesgo
+        risk = compute_risk_level(prob_fraud, prob_phishing).upper()
+        if risk == "BAJO":
+            low_count += 1
+        elif risk == "MEDIO":
+            med_count += 1
+        else:
+            high_count += 1
+
+        results.append({
+            "id": txn_id,
+            "user_id": user_id,
+            "amount": amt,
+            "description": desc,
+            "location": loc,
+            "fraud_probability": round(prob_fraud * 100, 1),
+            "phishing_probability": round(prob_phishing * 100, 1),
+            "risk_level": risk,
+            "is_fraud": bool(prob_fraud >= 0.30)
+        })
+
+    # Persistencia del batch en MongoDB si está disponible
+    mongo_db = get_mongo_db()
+    if mongo_db is not None:
+        try:
+            mongo_db["batch_uploads"].insert_one({
+                "filename": filename,
+                "total": len(results),
+                "low_risk": low_count,
+                "medium_risk": med_count,
+                "high_risk": high_count,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            })
+        except Exception as e:
+            print(f"⚠️ Error guardando batch en MongoDB: {e}")
+
+    return {
+        "status": "success",
+        "filename": filename,
+        "total_transactions": len(results),
+        "summary": {
+            "low_risk_count": low_count,
+            "medium_risk_count": med_count,
+            "high_risk_count": high_count
+        },
+        "transactions": results
+    }
 
 @app.post("/predict/text", response_model=PredictTextResponse, status_code=status.HTTP_200_OK, tags=["NLP Phishing"])
 async def predict_text(payload: PredictTextRequest):

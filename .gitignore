@@ -32,6 +32,14 @@ package-lock.json
 # Respaldos offline
 *.bundle
 
+# Flutter / Dart
+.dart_tool/
+**/.dart_tool/
+build/
+**/build/
+.flutter-plugins
+.flutter-plugins-dependencies
+
 # Binarios / Modelos pesados (permitiendo explícitamente los esenciales de NLP y ML)
 *.pkl
 *.joblib
