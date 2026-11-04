@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from typing import Optional, Dict, Any
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
@@ -243,6 +243,55 @@ class PredictTransactionResponse(BaseModel):
         "log_loss": 0.0060
     }
 
+class HoneypotResponse(BaseModel):
+    status: str = "deception_active"
+    message: str = "Unauthorized access attempt logged into honeypot_events"
+    saved_in_database: bool = True
+
+async def record_honeypot_event(request: Request, endpoint_path: str) -> None:
+    """
+    Intercepta telemetría de atacantes o bots en rutas señuelo (honeypot)
+    y persiste la evidencia en la colección 'honeypot_events' de MongoDB Atlas.
+    """
+    client_ip = request.client.host if request.client else "unknown"
+    user_agent = request.headers.get("user-agent", "unknown")
+    headers_dict = dict(request.headers)
+    method = request.method
+    
+    payload_body = None
+    try:
+        body_bytes = await request.body()
+        if body_bytes:
+            import json
+            try:
+                payload_body = json.loads(body_bytes.decode("utf-8", errors="replace"))
+            except Exception:
+                payload_body = body_bytes.decode("utf-8", errors="replace")[:1000]
+    except Exception:
+        payload_body = None
+
+    event_doc = {
+        "endpoint": endpoint_path,
+        "method": method,
+        "client_ip": client_ip,
+        "user_agent": user_agent,
+        "headers": headers_dict,
+        "payload": payload_body,
+        "query_params": dict(request.query_params),
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
+    mongo_db = get_mongo_db()
+    if mongo_db is not None:
+        try:
+            res = mongo_db["honeypot_events"].insert_one(event_doc)
+            inserted_id = getattr(res, "inserted_id", "acknowledged")
+            print(f"🚨 [Honeypot Trap] Intento registrado en 'honeypot_events': {endpoint_path} desde {client_ip} (ID {inserted_id})")
+        except Exception as e:
+            print(f"⚠️ [Honeypot Trap] Error al persistir en 'honeypot_events': {e}")
+    else:
+        print(f"🚨 [Honeypot Trap Local] {endpoint_path} interceptado desde {client_ip}")
+
 # --- Endpoints ---
 
 @app.get("/", tags=["Health Check"])
@@ -266,6 +315,8 @@ async def root():
             "predict_text": "/predict/text",
             "predict_transaction": "/predict/transaction",
             "dashboard_ui": "/dashboard",
+            "honeypot_admin_login": "/api/v1/admin/login",
+            "honeypot_debug_db": "/api/v1/debug-db",
             "swagger_docs": "/docs"
         }
     }
@@ -279,6 +330,32 @@ async def dashboard():
     return JSONResponse(
         status_code=404,
         content={"detail": "Archivo index.html del frontend no encontrado."}
+    )
+
+# --- Endpoints Señuelo / Honeypot Deception ---
+
+@app.api_route("/api/v1/admin/login", methods=["GET", "POST"], response_model=HoneypotResponse, tags=["Honeypot Deception"])
+async def honeypot_admin_login(request: Request):
+    """
+    Ruta señuelo / trampa Honeypot para capturar accesos administrativos no autorizados o bots automatizados.
+    """
+    await record_honeypot_event(request, "/api/v1/admin/login")
+    return HoneypotResponse(
+        status="deception_active",
+        message="Unauthorized access attempt logged into honeypot_events",
+        saved_in_database=True
+    )
+
+@app.api_route("/api/v1/debug-db", methods=["GET", "POST"], response_model=HoneypotResponse, tags=["Honeypot Deception"])
+async def honeypot_debug_db(request: Request):
+    """
+    Ruta señuelo / trampa Honeypot simulando un endpoint interno de depuración expuesto.
+    """
+    await record_honeypot_event(request, "/api/v1/debug-db")
+    return HoneypotResponse(
+        status="deception_active",
+        message="Unauthorized access attempt logged into honeypot_events",
+        saved_in_database=True
     )
 
 @app.post("/predict/text", response_model=PredictTextResponse, status_code=status.HTTP_200_OK, tags=["NLP Phishing"])

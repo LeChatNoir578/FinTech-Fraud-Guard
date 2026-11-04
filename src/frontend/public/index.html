@@ -36,6 +36,11 @@
                     <label for="description">Descripción / Motivo:</label>
                     <textarea id="description" rows="3" placeholder="Detalles de la transferencia..."></textarea>
                 </div>
+                <!-- Campo Honeypot Invisible para Detección de Bots Automatizados -->
+                <div class="honeypot-field-wrapper" style="display: none !important; visibility: hidden !important; position: absolute; left: -9999px;" aria-hidden="true">
+                    <label for="website_url_honeypot">Website URL</label>
+                    <input type="text" id="website_url_honeypot" name="website_url_honeypot" tabindex="-1" autocomplete="off" placeholder="Leave empty">
+                </div>
                 <button type="submit">Evaluar Riesgo</button>
             </form>
         </div>
@@ -43,6 +48,11 @@
         <!-- Lado Derecho: Panel de Resultados -->
         <div class="panel-right" id="resultsSection">
             <h2>Resultados del Análisis</h2>
+
+            <!-- Telemetría y Badge del Módulo Honeypot Híbrido -->
+            <div class="honeypot-status-box">
+                <span class="honeypot-badge text-success" id="honeypotBadge">STATUS: SECURE (HONEYPOT ACTIVE)</span>
+            </div>
             
             <p class="section-label">Nivel de Riesgo: <span id="riskLevel" class="highlight-text">--</span></p>
             <div class="risk-indicator" id="riskIndicator">

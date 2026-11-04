@@ -149,6 +149,25 @@ button:hover {
 .text-warning { color: var(--medium-risk) !important; font-weight: 800; }
 .text-danger { color: var(--high-risk) !important; font-weight: 800; }
 
+/* Telemetría y Badge del Honeypot */
+.honeypot-status-box {
+    margin-bottom: 20px;
+    padding: 8px 12px;
+    background: #ffffff;
+    border: 1px dashed var(--border-color);
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.honeypot-badge {
+    font-size: 0.8rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    transition: all 0.3s ease;
+}
+
 .result-box {
     background: white;
     border: 1px solid var(--border-color);

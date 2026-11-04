@@ -9,6 +9,46 @@ document.addEventListener('DOMContentLoaded', () => {
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
 
+        // 0. Módulo de Trampa Honeypot: Detección y bloqueo de bots automatizados
+        const honeypotInput = document.getElementById('website_url_honeypot');
+        const honeypotVal = honeypotInput ? honeypotInput.value.trim() : "";
+
+        if (honeypotVal !== "") {
+            // Requisito 1: Alerta inmediata en inglés (First Conditional + Imperativos)
+            alert("[HONEYPOT DETECTED] Automated bot pattern identified! Stop the automated script. If you attempt unauthorized access, your IP address will be logged into audit records immediately.");
+
+            // Actualizar telemetría visual del badge a BOT TRAPPED
+            const badge = document.getElementById('honeypotBadge');
+            if (badge) {
+                badge.textContent = "STATUS: BOT TRAPPED";
+                badge.classList.remove('text-success');
+                badge.classList.add('text-danger');
+            }
+
+            // Notificar al endpoint señuelo de Honeypot en el backend con las métricas del bot
+            fetch(`${API_BASE_URL}/api/v1/admin/login`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-Honeypot-Trigger": "frontend_invisible_field"
+                },
+                body: JSON.stringify({
+                    trap_type: "bot_form_field_injection",
+                    honeypot_field: "website_url_honeypot",
+                    injected_value: honeypotVal,
+                    form_attempt: {
+                        userId: document.getElementById('userId').value,
+                        amount: document.getElementById('amount').value,
+                        location: document.getElementById('location').value,
+                        description: document.getElementById('description').value
+                    },
+                    timestamp: new Date().toISOString()
+                })
+            }).catch(err => console.warn("Honeypot telemetry dispatch:", err));
+
+            return; // Detener el procesamiento normal de la transacción
+        }
+
         // 1. Recolección de datos crudos
         const rawData = {
             userId: document.getElementById('userId').value,
@@ -137,6 +177,7 @@ function updateUIState(state) {
     const lblBajo = document.getElementById('lblBajo');
     const lblMedio = document.getElementById('lblMedio');
     const lblAlto = document.getElementById('lblAlto');
+    const honeypotBadge = document.getElementById('honeypotBadge');
 
     if (state === 'loading') {
         if (riskLevelElem) {
@@ -164,6 +205,13 @@ function updateUIState(state) {
         if (lblBajo) lblBajo.classList.remove('active');
         if (lblMedio) lblMedio.classList.remove('active');
         if (lblAlto) lblAlto.classList.remove('active');
+
+        // Restaurar estado seguro de Honeypot si se resetea
+        if (honeypotBadge) {
+            honeypotBadge.textContent = "STATUS: SECURE (HONEYPOT ACTIVE)";
+            honeypotBadge.classList.remove('text-danger');
+            honeypotBadge.classList.add('text-success');
+        }
     }
 }
 
@@ -225,5 +273,13 @@ function renderResults(data) {
         } else {
             alertBox.style.display = 'none';
         }
+    }
+
+    // 6. Confirmación de estado seguro del Honeypot
+    const honeypotBadge = document.getElementById('honeypotBadge');
+    if (honeypotBadge && !honeypotBadge.classList.contains('text-danger')) {
+        honeypotBadge.textContent = "STATUS: SECURE (HONEYPOT ACTIVE)";
+        honeypotBadge.classList.remove('text-danger');
+        honeypotBadge.classList.add('text-success');
     }
 }
