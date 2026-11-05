@@ -1,0 +1,24 @@
+# Python bytecode y caché
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Entornos virtuales y configuraciones locales
+.venv/
+venv/
+.env
+
+# Archivos de metadatos del sistema (macOS)
+.DS_Store
+._*
+
+# Notebooks y dependencias innecesarias en producción
+*.ipynb
+node_modules/
+package.json
+package-lock.json
+
+# Permitir explícitamente los artefactos esenciales del modelo
+!phishing_model_v1.joblib
+!tfidf_vectorizer_v1.joblib
+!vectorizer_terms.csv
