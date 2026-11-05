@@ -128,10 +128,15 @@ class ApiService {
     }
   }
 
-  /// URL base calculada para comunicación entre el dispositivo físico y FastAPI
+  /// URL base calculada para comunicación entre el dispositivo físico/web y FastAPI
   static String get baseUrl {
     if (kIsWeb) {
-      return "http://localhost:$port";
+      try {
+        final origin = Uri.base.origin;
+        if (origin.isNotEmpty && !origin.startsWith('file:') && !origin.startsWith('null')) {
+          return origin;
+        }
+      } catch (_) {}
     }
     return "http://$host:$port";
   }

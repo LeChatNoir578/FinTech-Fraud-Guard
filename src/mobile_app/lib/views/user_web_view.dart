@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../theme/app_theme.dart';
@@ -54,6 +55,12 @@ class _UserWebViewState extends State<UserWebView> with SingleTickerProviderStat
   void _initWebView() {
     _determineUrl();
     _loadTimeoutTimer?.cancel();
+
+    if (kIsWeb) {
+      _isWebLoading = false;
+      _hasWebError = false;
+      return;
+    }
 
     // Timer de seguridad: Si en 8 segundos no responde la URL web, activar fallback
     _loadTimeoutTimer = Timer(const Duration(seconds: 8), () {
@@ -118,6 +125,13 @@ class _UserWebViewState extends State<UserWebView> with SingleTickerProviderStat
 
   void _refreshDashboard() {
     _determineUrl();
+    if (kIsWeb) {
+      setState(() {
+        _isWebLoading = false;
+        _hasWebError = false;
+      });
+      return;
+    }
     if (_webViewController != null) {
       setState(() {
         _isWebLoading = true;
@@ -640,6 +654,9 @@ class _UserWebViewState extends State<UserWebView> with SingleTickerProviderStat
 
   /// Pestaña 2: WebView Embebido con manejo de errores y fallback
   Widget _buildWebViewSection() {
+    if (kIsWeb) {
+      return _buildWebPlatformView();
+    }
     return Column(
       children: [
         if (_isWebLoading)
@@ -654,6 +671,59 @@ class _UserWebViewState extends State<UserWebView> with SingleTickerProviderStat
               : WebViewWidget(controller: _webViewController!),
         ),
       ],
+    );
+  }
+
+  Widget _buildWebPlatformView() {
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24.0),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 550),
+          child: Card(
+            color: AppTheme.surface,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+              side: const BorderSide(color: AppTheme.borderGold),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(24.0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Icon(Icons.language, color: AppTheme.goldImperial, size: 48),
+                  const SizedBox(height: 12),
+                  const Text(
+                    "Dashboard Web de FinTech Fraud Guard",
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: AppTheme.goldImperial, fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    "Estás utilizando la aplicación en entorno Web.\nPuedes evaluar mensajes directamente con el 'Evaluador Nativo' o consultar el dashboard HTML en:\n$_targetUrl",
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13, height: 1.4),
+                  ),
+                  const Divider(height: 28),
+                  ElevatedButton.icon(
+                    onPressed: () {
+                      _tabController.animateTo(0);
+                    },
+                    icon: const Icon(Icons.analytics_outlined),
+                    label: const Text("Ir al Evaluador de Mensajes"),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.goldImperial,
+                      foregroundColor: Colors.black,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 

@@ -9,7 +9,7 @@ from typing import Optional, Dict, Any, List
 from fastapi import FastAPI, HTTPException, status, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field, field_validator
 from dotenv import load_dotenv
 import joblib
@@ -168,6 +168,11 @@ if os.path.exists(frontend_public_dir):
         app.mount("/css", StaticFiles(directory=css_dir), name="css")
     if os.path.exists(js_dir):
         app.mount("/js", StaticFiles(directory=js_dir), name="js")
+
+# Montar la aplicación Flutter Web si existe la compilación
+flutter_web_dir = os.path.join(BASE_DIR, "src", "mobile_app", "build", "web")
+if os.path.exists(flutter_web_dir):
+    app.mount("/app", StaticFiles(directory=flutter_web_dir, html=True), name="flutter_web_app")
 
 # --- Mapeo de Términos / Normalización para el Vectorizador TF-IDF ---
 SPANISH_TO_STEMS = {
@@ -346,12 +351,18 @@ async def root():
             "predict_text": "/predict/text",
             "predict_transaction": "/predict/transaction",
             "dashboard_ui": "/dashboard",
+            "flutter_web_app": "/app/",
             "honeypot_admin_login": "/api/v1/admin/login",
             "honeypot_debug_db": "/api/v1/debug-db",
             "bank_upload_batch": "/api/v1/bank/upload-batch",
             "swagger_docs": "/docs"
         }
     }
+
+@app.get("/app", include_in_schema=False)
+async def flutter_app_redirect():
+    """Redirige automáticamente a la aplicación Flutter Web."""
+    return RedirectResponse(url="/app/")
 
 @app.get("/dashboard", tags=["Frontend"])
 async def dashboard():
