@@ -1,10 +1,55 @@
-.env
+# Entorno virtual
+.venv
 .venv/
 venv/
+ENV/
+env/
+
+# Variables de entorno y credenciales
+.env
+.env.*
+!.env.example
+
+# Caché y artefactos de Python
 __pycache__/
-*.joblib
-*.pkl
+*.py[cod]
+*$py.class
+
+# Node / JS
 node_modules/
+package-lock.json
+
+# Metadatos del sistema (macOS)
 .DS_Store
+._*
+**/.DS_Store
+**/._*
+
+# IDEs
 .vscode/
 .idea/
+
+# Respaldos offline
+*.bundle
+
+# Flutter / Dart
+.dart_tool/
+**/.dart_tool/
+build/
+**/build/
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# Binarios / Modelos pesados (permitiendo explícitamente los esenciales de NLP y ML)
+*.pkl
+*.joblib
+!nlp_models/phishing_model_v1.joblib
+!nlp_models/tfidf_vectorizer_v1.joblib
+!models/saved/scaler.joblib
+!models/saved/svm_model.joblib
+!models/saved/knn_model.joblib
+!models/saved/red_model.joblib
+!ai_models/saved/scaler.joblib
+!ai_models/saved/svm_model.joblib
+!ai_models/saved/knn_model.joblib
+!ai_models/saved/red_model.joblib

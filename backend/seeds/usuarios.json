@@ -1,0 +1,13 @@
+[
+    {
+        "_id": {
+            "$oid": "65a000000000000000000001"
+        },
+        "nombre": "Juan Alberto",
+        "email": "juan.alberto@example.com",
+        "estado_cuenta": "Activo",
+        "fecha_registro": {
+            "$date": "2026-10-25T10:00:00.000Z"
+        }
+    }
+]
