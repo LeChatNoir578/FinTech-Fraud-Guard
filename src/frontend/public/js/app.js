@@ -1,0 +1,319 @@
+document.addEventListener('DOMContentLoaded', () => {
+    const form = document.getElementById('transactionForm');
+    
+    // Detección dinámica de la URL base de FastAPI (compatible con localhost y archivo local)
+    const API_BASE_URL = (window.location.origin && window.location.origin !== "null" && !window.location.protocol.startsWith("file"))
+        ? window.location.origin
+        : "http://localhost:8000";
+
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        // 0. Módulo de Trampa Honeypot: Detección y bloqueo de bots automatizados
+        const honeypotInput = document.getElementById('website_url_honeypot');
+        const honeypotVal = honeypotInput ? honeypotInput.value.trim() : "";
+
+        if (honeypotVal !== "") {
+            // Requisito 1: Alerta inmediata en inglés (First Conditional + Imperativos)
+            alert("[HONEYPOT DETECTED] Automated bot pattern identified! Stop the automated script. If you attempt unauthorized access, your IP address will be logged into audit records immediately.");
+
+            // Actualizar telemetría visual del badge a BOT TRAPPED
+            const badge = document.getElementById('honeypotBadge');
+            if (badge) {
+                badge.textContent = "STATUS: BOT TRAPPED";
+                badge.classList.remove('text-success');
+                badge.classList.add('text-danger');
+            }
+
+            // Notificar al endpoint señuelo de Honeypot en el backend con las métricas del bot
+            fetch(`${API_BASE_URL}/api/v1/admin/login`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-Honeypot-Trigger": "frontend_invisible_field"
+                },
+                body: JSON.stringify({
+                    trap_type: "bot_form_field_injection",
+                    honeypot_field: "website_url_honeypot",
+                    injected_value: honeypotVal,
+                    form_attempt: {
+                        userId: document.getElementById('userId').value,
+                        amount: document.getElementById('amount').value,
+                        location: document.getElementById('location').value,
+                        description: document.getElementById('description').value
+                    },
+                    timestamp: new Date().toISOString()
+                })
+            }).catch(err => console.warn("Honeypot telemetry dispatch:", err));
+
+            return; // Detener el procesamiento normal de la transacción
+        }
+
+        // 1. Recolección de datos crudos
+        const rawData = {
+            userId: document.getElementById('userId').value,
+            amount: parseFloat(document.getElementById('amount').value),
+            location: document.getElementById('location').value,
+            description: document.getElementById('description').value
+        };
+
+        // 2. Hardening OWASP: Sanitización contra XSS usando DOMPurify
+        const safeData = {
+            userId: DOMPurify.sanitize(rawData.userId.trim()),
+            amount: rawData.amount,
+            location: DOMPurify.sanitize(rawData.location.trim()),
+            description: DOMPurify.sanitize(rawData.description.trim())
+        };
+
+        // 3. Hardening OWASP: Validación estática contra inyección SQL/Comandos
+        const dangerousPattern = /(\b(SELECT|UPDATE|DELETE|INSERT|DROP|EXEC|UNION)\b)|(;|\||&&|`|\$|<|>)/i;
+        if (dangerousPattern.test(safeData.description) || dangerousPattern.test(safeData.location)) {
+            // Alerta por Sanitización OWASP / Caracteres Prohibidos (Imperativo + First Conditional)
+            alert("[SECURITY ALERT] Invalid characters detected! Stop the input. If you include special symbols, the system will block your request immediately.");
+            return;
+        }
+
+        // 4. Ejecución del análisis conectando con los endpoints de FastAPI
+        updateUIState('loading');
+        
+        try {
+            // Petición 1: Evaluación de Fraude Transaccional (IA - David: Modelo SVM con SMOTE)
+            const transactionPromise = fetch(`${API_BASE_URL}/predict/transaction`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    amount: safeData.amount,
+                    user_id: safeData.userId,
+                    location: safeData.location,
+                    description: safeData.description
+                })
+            }).then(async (response) => {
+                if (!response.ok) {
+                    const errorBody = await response.json().catch(() => ({}));
+                    throw new Error(errorBody.detail || `Error HTTP ${response.status} en /predict/transaction`);
+                }
+                return response.json();
+            });
+
+            // Petición 2: Evaluación de Minería de Texto y Phishing (NLP - Aaron + Juan Alberto: MongoDB)
+            const textToAnalyze = safeData.description || "Transacción bancaria ordinaria";
+            const nlpPromise = fetch(`${API_BASE_URL}/predict/text`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    text: textToAnalyze
+                })
+            }).then(async (response) => {
+                if (!response.ok) {
+                    const errorBody = await response.json().catch(() => ({}));
+                    throw new Error(errorBody.detail || `Error HTTP ${response.status} en /predict/text`);
+                }
+                return response.json();
+            });
+
+            // Ejecución en paralelo
+            const [transactionRes, nlpRes] = await Promise.all([transactionPromise, nlpPromise]);
+
+            // Consolidación de métricas
+            const isFraud = Boolean(transactionRes.is_fraud);
+            const isPhishing = Boolean(nlpRes.is_phishing);
+            const nlpProbability = parseFloat(nlpRes.probability || 0);
+            const fraudProbability = parseFloat(transactionRes.probability || 0);
+            const fraudProbabilityPercent = (fraudProbability * 100).toFixed(1);
+            const nlpProbabilityPercent = (nlpProbability * 100).toFixed(1);
+
+            // Requisito 1: Cálculo del Nivel de Riesgo global consolidado
+            // Si la probabilidad de fraude es menor al 20% (< 0.20) y la de phishing es menor al 30% (< 0.30), DEBE ser "BAJO"
+            const globalRiskScore = Math.max(fraudProbability, nlpProbability);
+            let combinedRiskLevel = 'BAJO';
+
+            if (fraudProbability < 0.20 && nlpProbability < 0.30) {
+                combinedRiskLevel = 'BAJO';
+            } else if (fraudProbability >= 0.70 || nlpProbability > 0.70) {
+                combinedRiskLevel = 'ALTO';
+            } else if (globalRiskScore >= 0.30 || isPhishing || isFraud) {
+                combinedRiskLevel = 'MEDIO';
+            } else {
+                combinedRiskLevel = 'BAJO';
+            }
+
+            // Requisito 2: Solo muestra la caja de [ALERTA PHISHING] si la probabilidad de NLP es estrictamente mayor al 40% (> 0.40)
+            const isPhishingAlert = nlpProbability > 0.40;
+            let nlpMessage = "";
+            if (isPhishingAlert) {
+                nlpMessage = `[ALERTA PHISHING] Probabilidad: ${nlpProbabilityPercent}% — Patrón de ingeniería social detectado en la descripción.`;
+            } else {
+                nlpMessage = `Texto verificado sin indicios de phishing (Riesgo estimado: ${nlpProbabilityPercent}%).`;
+            }
+
+            const combinedResult = {
+                riskLevel: combinedRiskLevel,
+                globalRiskScore: globalRiskScore,
+                fraudProbability: fraudProbabilityPercent,
+                nlpProbability: nlpProbabilityPercent,
+                isPhishingAlert: isPhishingAlert,
+                nlpAnalysis: nlpMessage,
+                triggerAlert: combinedRiskLevel === 'ALTO' || nlpProbability > 0.70
+            };
+
+            // 5. Renderizado seguro en el DOM (#resultsSection)
+            renderResults(combinedResult);
+
+            // Alerta Emergente (Second Conditional) si el riesgo consolidado es ALTO o phishing > 70%
+            if (combinedRiskLevel === 'ALTO' || nlpProbability > 0.70) {
+                alert("[CRITICAL RISK] If a threat actor attempted a phishing attack, Fraud Guard would isolate the transaction. Please review the input parameters!");
+            }
+
+        } catch (error) {
+            console.error("Error conectando con la API o Base de Datos:", error);
+            // Alerta por fallo de red o estado de base de datos (Imperativo)
+            alert("[SYSTEM NOTICE] Check your internet connection or verify the database status before submitting again.");
+            updateUIState('reset');
+        }
+    });
+});
+
+function updateUIState(state) {
+    const riskLevelElem = document.getElementById('riskLevel');
+    const fraudElem = document.getElementById('fraudProbability');
+    const nlpProbElem = document.getElementById('nlpProbability');
+    const nlpResult = document.getElementById('nlpResult');
+    const englishAlert = document.getElementById('englishAlert');
+    const lblBajo = document.getElementById('lblBajo');
+    const lblMedio = document.getElementById('lblMedio');
+    const lblAlto = document.getElementById('lblAlto');
+    const honeypotBadge = document.getElementById('honeypotBadge');
+
+    if (state === 'loading') {
+        if (riskLevelElem) {
+            riskLevelElem.textContent = "...";
+            riskLevelElem.classList.remove('text-success', 'text-warning', 'text-danger');
+        }
+        if (fraudElem) fraudElem.textContent = "...";
+        if (nlpProbElem) nlpProbElem.textContent = "...";
+        if (nlpResult) {
+            nlpResult.classList.remove('alert-phishing-box');
+            nlpResult.style.color = '';
+            nlpResult.style.borderColor = '';
+            nlpResult.style.backgroundColor = '';
+            nlpResult.innerHTML = '<span class="placeholder-text">Analizando parámetros y contactando modelos de IA...</span>';
+        }
+        if (englishAlert) englishAlert.style.display = 'none';
+
+        if (lblBajo) lblBajo.classList.remove('active');
+        if (lblMedio) lblMedio.classList.remove('active');
+        if (lblAlto) lblAlto.classList.remove('active');
+    } else if (state === 'reset') {
+        if (riskLevelElem) {
+            riskLevelElem.textContent = "--";
+            riskLevelElem.classList.remove('text-success', 'text-warning', 'text-danger');
+        }
+        if (fraudElem) fraudElem.textContent = "--";
+        if (nlpProbElem) nlpProbElem.textContent = "--";
+        if (nlpResult) {
+            nlpResult.classList.remove('alert-phishing-box');
+            nlpResult.style.color = '';
+            nlpResult.style.borderColor = '';
+            nlpResult.style.backgroundColor = '';
+            nlpResult.innerHTML = '<span class="placeholder-text">Esperando ejecución del modelo...</span>';
+        }
+        if (englishAlert) englishAlert.style.display = 'none';
+
+        if (lblBajo) lblBajo.classList.remove('active');
+        if (lblMedio) lblMedio.classList.remove('active');
+        if (lblAlto) lblAlto.classList.remove('active');
+
+        // Restaurar estado seguro de Honeypot si se resetea
+        if (honeypotBadge) {
+            honeypotBadge.textContent = "STATUS: SECURE (HONEYPOT ACTIVE)";
+            honeypotBadge.classList.remove('text-danger');
+            honeypotBadge.classList.add('text-success');
+        }
+    }
+}
+
+function renderResults(data) {
+    // 1. Elemento del nivel de riesgo (#riskLevel) con clases de color
+    // Requisito 2: "Asigna la clase '.text-success' y el texto 'BAJO' cuando el riesgo global sea menor al 30%."
+    const riskLevelElem = document.getElementById('riskLevel');
+    if (riskLevelElem) {
+        riskLevelElem.classList.remove('text-success', 'text-warning', 'text-danger');
+
+        if (data.globalRiskScore < 0.30 || data.riskLevel.toUpperCase() === 'BAJO') {
+            riskLevelElem.textContent = "BAJO";
+            riskLevelElem.classList.add('text-success'); // Verde
+        } else if (data.riskLevel.toUpperCase() === 'MEDIO' || (data.globalRiskScore >= 0.30 && data.globalRiskScore < 0.70)) {
+            riskLevelElem.textContent = "MEDIO";
+            riskLevelElem.classList.add('text-warning'); // Amarillo / Naranja
+        } else {
+            riskLevelElem.textContent = "ALTO";
+            riskLevelElem.classList.add('text-danger');  // Rojo
+        }
+    }
+
+    // 2. Renderizado de porcentajes dinámicos en #resultsSection
+    const fraudElem = document.getElementById('fraudProbability');
+    if (fraudElem) {
+        fraudElem.textContent = data.fraudProbability;
+    }
+
+    const nlpProbElem = document.getElementById('nlpProbability');
+    if (nlpProbElem) {
+        nlpProbElem.textContent = data.nlpProbability;
+    }
+
+    // 3. Activación de los chips en el indicador visual
+    const lblBajo = document.getElementById('lblBajo');
+    const lblMedio = document.getElementById('lblMedio');
+    const lblAlto = document.getElementById('lblAlto');
+    
+    if (lblBajo) lblBajo.classList.remove('active');
+    if (lblMedio) lblMedio.classList.remove('active');
+    if (lblAlto) lblAlto.classList.remove('active');
+
+    const activeRisk = riskLevelElem ? riskLevelElem.textContent : data.riskLevel.toUpperCase();
+    if (activeRisk === 'BAJO' && lblBajo) lblBajo.classList.add('active');
+    else if (activeRisk === 'MEDIO' && lblMedio) lblMedio.classList.add('active');
+    else if (activeRisk === 'ALTO' && lblAlto) lblAlto.classList.add('active');
+
+    // 4. Inserción de resultado descriptivo de NLP y visualización de caja de alerta
+    // Requisito 2: "Solo muestra la caja de [ALERTA PHISHING] si la probabilidad de NLP es estrictamente mayor al 40%."
+    const nlpBox = document.getElementById('nlpResult');
+    if (nlpBox) {
+        nlpBox.textContent = data.nlpAnalysis;
+        if (data.isPhishingAlert) {
+            nlpBox.classList.add('alert-phishing-box');
+            nlpBox.style.color = 'var(--high-risk)';
+            nlpBox.style.borderColor = 'var(--high-risk)';
+            nlpBox.style.backgroundColor = '#fef2f2';
+        } else {
+            nlpBox.classList.remove('alert-phishing-box');
+            nlpBox.style.color = 'var(--text-main)';
+            nlpBox.style.borderColor = 'var(--border-color)';
+            nlpBox.style.backgroundColor = '#ffffff';
+        }
+    }
+
+    // 5. Despliegue de la Alerta Ejecutiva
+    const alertBox = document.getElementById('englishAlert');
+    if (alertBox) {
+        if (data.triggerAlert) {
+            alertBox.style.display = 'block';
+            alertBox.innerHTML = `<strong>Security Alert:</strong> If a threat actor attempted a phishing attack, Fraud Guard would isolate the transaction. Please review the input parameters!`;
+        } else {
+            alertBox.style.display = 'none';
+        }
+    }
+
+    // 6. Confirmación de estado seguro del Honeypot
+    const honeypotBadge = document.getElementById('honeypotBadge');
+    if (honeypotBadge && !honeypotBadge.classList.contains('text-danger')) {
+        honeypotBadge.textContent = "STATUS: SECURE (HONEYPOT ACTIVE)";
+        honeypotBadge.classList.remove('text-danger');
+        honeypotBadge.classList.add('text-success');
+    }
+}
