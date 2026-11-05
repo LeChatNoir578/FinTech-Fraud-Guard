@@ -355,6 +355,10 @@ async def root():
             "honeypot_admin_login": "/api/v1/admin/login",
             "honeypot_debug_db": "/api/v1/debug-db",
             "bank_upload_batch": "/api/v1/bank/upload-batch",
+            "database_records_all": "/api/v1/database/records",
+            "database_transactions": "/api/v1/database/transactions",
+            "database_phishing": "/api/v1/database/phishing",
+            "database_honeypot": "/api/v1/database/honeypot",
             "swagger_docs": "/docs"
         }
     }
@@ -400,6 +404,88 @@ async def honeypot_debug_db(request: Request):
         message="Unauthorized access attempt logged into honeypot_events",
         saved_in_database=True
     )
+
+# --- Endpoints de Consulta / Acceso a la Base de Datos ---
+
+def _serialize_doc(doc):
+    d = dict(doc)
+    if "_id" in d:
+        d["_id"] = str(d["_id"])
+    return d
+
+@app.get("/api/v1/database/records", tags=["Database Access"])
+async def get_all_database_records():
+    """
+    Acceso público en tiempo real a las colecciones de la base de datos:
+    - transacciones
+    - phishing_logs
+    - honeypot_events
+    - batch_uploads
+    """
+    mongo_db = get_mongo_db()
+    if mongo_db is None:
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"status": "offline", "message": "Base de datos no inicializada."}
+        )
+
+    transacciones = [_serialize_doc(d) for d in mongo_db["transacciones"].find()]
+    phishing_logs = [_serialize_doc(d) for d in mongo_db["phishing_logs"].find()]
+    honeypot_events = [_serialize_doc(d) for d in mongo_db["honeypot_events"].find()]
+    batch_uploads = [_serialize_doc(d) for d in mongo_db["batch_uploads"].find()]
+
+    # Mostrar más recientes primero
+    transacciones.reverse()
+    phishing_logs.reverse()
+    honeypot_events.reverse()
+    batch_uploads.reverse()
+
+    return {
+        "status": "connected",
+        "database_name": getattr(mongo_db, "name", "sistema_financiero"),
+        "total_records": {
+            "transacciones": len(transacciones),
+            "phishing_logs": len(phishing_logs),
+            "honeypot_events": len(honeypot_events),
+            "batch_uploads": len(batch_uploads)
+        },
+        "collections": {
+            "transacciones": transacciones[:50],
+            "phishing_logs": phishing_logs[:50],
+            "honeypot_events": honeypot_events[:50],
+            "batch_uploads": batch_uploads[:50]
+        }
+    }
+
+@app.get("/api/v1/database/transactions", tags=["Database Access"])
+async def get_database_transactions():
+    """Acceso a los registros de transacciones evaluadas."""
+    mongo_db = get_mongo_db()
+    if mongo_db is None:
+        return []
+    items = [_serialize_doc(d) for d in mongo_db["transacciones"].find()]
+    items.reverse()
+    return items
+
+@app.get("/api/v1/database/phishing", tags=["Database Access"])
+async def get_database_phishing_logs():
+    """Acceso a los registros de análisis de phishing (NLP)."""
+    mongo_db = get_mongo_db()
+    if mongo_db is None:
+        return []
+    items = [_serialize_doc(d) for d in mongo_db["phishing_logs"].find()]
+    items.reverse()
+    return items
+
+@app.get("/api/v1/database/honeypot", tags=["Database Access"])
+async def get_database_honeypot_events():
+    """Acceso a los registros de auditoría de trampas Honeypot."""
+    mongo_db = get_mongo_db()
+    if mongo_db is None:
+        return []
+    items = [_serialize_doc(d) for d in mongo_db["honeypot_events"].find()]
+    items.reverse()
+    return items
 
 # --- Endpoint para Entidades Bancarias: Procesamiento de Lotes Masivos ---
 
