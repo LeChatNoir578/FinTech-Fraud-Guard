@@ -117,7 +117,7 @@ class TextPredictionResult {
 class ApiService {
   // Configuración de red para dispositivo físico Android
   // Permite configurar la dirección IP de la red local (host) en lugar de 'localhost' o '127.0.0.1'
-  static String host = "192.168.100.23";
+  static String host = "192.168.120.156";
   static int port = 8000;
 
   /// Permite actualizar dinámicamente la IP del servidor FastAPI desde la app

@@ -16,7 +16,7 @@ class _UserWebViewState extends State<UserWebView> with SingleTickerProviderStat
   WebViewController? _webViewController;
   bool _isWebLoading = true;
   bool _hasWebError = false;
-  String _targetUrl = "http://192.168.100.23:8000/dashboard";
+  String _targetUrl = "http://192.168.120.156:8000/dashboard";
   Timer? _loadTimeoutTimer;
 
   // Controladores y estado del Formulario Nativo (Requisito 3)

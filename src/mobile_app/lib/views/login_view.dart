@@ -13,8 +13,8 @@ class LoginView extends StatefulWidget {
 
 class _LoginViewState extends State<LoginView> {
   final _formKey = GlobalKey<FormState>();
-  final TextEditingController _userController = TextEditingController(text: 'admin@fraudguard.fintech');
-  final TextEditingController _passwordController = TextEditingController(text: '••••••••');
+  final TextEditingController _userController = TextEditingController(text: '');
+  final TextEditingController _passwordController = TextEditingController(text: '');
   
   String _selectedRole = 'Usuario Normal';
   final List<String> _roles = ['Usuario Normal', 'Entidad Bancaria'];
