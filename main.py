@@ -447,6 +447,7 @@ async def record_honeypot_event(request: Request, endpoint_path: str) -> None:
 # --- Endpoints ---
 
 @app.get("/", tags=["Health Check"])
+@app.get("/health", tags=["Health Check"])
 async def root():
     """Estado general y catálogo de microservicios del sistema."""
     has_mongo = ml_artifacts.get("mongo_db") is not None
