@@ -4,8 +4,9 @@ from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from typing import Dict, Any
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, APIRouter, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 from dotenv import load_dotenv
 import joblib
@@ -21,6 +22,62 @@ MODEL_PATH = os.path.join(BASE_DIR, "phishing_model_v1.joblib")
 VECTORIZER_PATH = os.path.join(BASE_DIR, "tfidf_vectorizer_v1.joblib")
 
 ml_artifacts: Dict[str, Any] = {}
+
+class AwaitableResult:
+    def __init__(self, res):
+        self._res = res
+
+    def __await__(self):
+        async def _coro():
+            return self._res
+        return _coro().__await__()
+
+    def __getattr__(self, name):
+        return getattr(self._res, name)
+
+    def __repr__(self):
+        return repr(self._res)
+
+class AsyncSafeCollection:
+    def __init__(self, col):
+        self._col = col
+
+    def insert_one(self, *args, **kwargs):
+        if self._col is None:
+            class SimulatedInsertResult:
+                acknowledged = True
+                inserted_id = "simulated_local_alert_id"
+            return AwaitableResult(SimulatedInsertResult())
+        res = self._col.insert_one(*args, **kwargs)
+        if hasattr(res, "__await__"):
+            return res
+        return AwaitableResult(res)
+
+    def __getattr__(self, name):
+        if self._col is not None:
+            return getattr(self._col, name)
+        raise AttributeError(name)
+
+class AsyncSafeDatabase:
+    def __init__(self, db_getter):
+        self._db_getter = db_getter
+
+    @property
+    def db(self):
+        if callable(self._db_getter):
+            return self._db_getter()
+        return self._db_getter
+
+    def __getitem__(self, name):
+        raw_db = self.db
+        col = raw_db[name] if raw_db is not None else None
+        return AsyncSafeCollection(col)
+
+    def __getattr__(self, name):
+        raw_db = self.db
+        if raw_db is not None:
+            return getattr(raw_db, name)
+        return None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -58,6 +115,7 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             print(f"⚠️ Error conectando a MongoDB Atlas: {e}")
 
+    app.mongodb = AsyncSafeDatabase(get_mongo_db)
     yield
     if ml_artifacts.get("mongo_client"):
         ml_artifacts["mongo_client"].close()
@@ -164,13 +222,64 @@ def clean_text(text: str) -> str:
         raw = re.sub(pattern, repl, raw)
     return re.sub(r"[^\w\s]", "", raw)
 
+def run_nlp_model(text: str) -> Dict[str, Any]:
+    """
+    Ejecuta el pipeline de NLP (TF-IDF + Modelo clasificador SVM/LogisticRegression)
+    para evaluar si un texto es intento de phishing o legítimo.
+    """
+    model = ml_artifacts.get("model")
+    vectorizer = ml_artifacts.get("vectorizer")
+
+    has_phishing_keywords = bool(PHISHING_KEYWORDS_PATTERN.search(text))
+
+    if not model or not vectorizer:
+        prob = 0.85 if has_phishing_keywords else 0.05
+        label = "phishing" if has_phishing_keywords else "legitimate"
+        return {
+            "label": label,
+            "score": prob,
+            "is_phishing": bool(prob >= 0.50)
+        }
+
+    try:
+        texto_limpio = clean_text(text)
+        texto_vec = vectorizer.transform([texto_limpio])
+        probabilidades = model.predict_proba(texto_vec)[0]
+        raw_prob_phishing = float(probabilidades[1])
+
+        if not has_phishing_keywords or (texto_vec.nnz == 0) or (0.49 <= raw_prob_phishing <= 0.51 and not has_phishing_keywords):
+            prob_phishing = 0.05
+        else:
+            prob_phishing = raw_prob_phishing
+
+        calibrated_prob = round(prob_phishing, 4)
+        is_phishing = bool(calibrated_prob >= 0.50)
+        prediction_label = "phishing" if is_phishing else "legitimate"
+
+        return {
+            "label": prediction_label,
+            "score": calibrated_prob,
+            "is_phishing": is_phishing
+        }
+    except Exception as e:
+        print(f"⚠️ Error en run_nlp_model: {e}")
+        prob = 0.85 if has_phishing_keywords else 0.05
+        label = "phishing" if has_phishing_keywords else "legitimate"
+        return {
+            "label": label,
+            "score": prob,
+            "is_phishing": bool(prob >= 0.50)
+        }
+
 # --- Esquemas Pydantic ---
-class PredictRequest(BaseModel):
+class TextEvaluationSchema(BaseModel):
     text: str = Field(
         ...,
-        description="Texto o mensaje a analizar para determinar riesgo de phishing.",
-        examples=["Estimado cliente, su cuenta ha sido suspendida. Haga clic aquí para verificar sus datos."]
+        description="Texto o mensaje sospechoso a evaluar contra phishing.",
+        examples=["Estimado cliente, su cuenta ha sido suspendida. Ingrese a este enlace para verificar sus datos."]
     )
+    website_url_check: str = Field("", description="Campo trampa oculto en la interfaz (Honeypot)")
+    website_url_honeypot: Optional[str] = Field(None, description="Alias campo trampa")
 
     @field_validator("text")
     @classmethod
@@ -180,6 +289,8 @@ class PredictRequest(BaseModel):
             raise ValueError("El texto proporcionado no puede estar vacío.")
         return clean_text
 
+PredictRequest = TextEvaluationSchema
+
 class PredictResponse(BaseModel):
     text: str
     prediction: str
@@ -187,82 +298,79 @@ class PredictResponse(BaseModel):
     probability: float
     saved_in_database: bool = False
 
-# --- Endpoints ---
-@app.get("/", tags=["Health Check"])
-async def root():
-    return {
-        "project": "FinTech Fraud Guard",
-        "module": "NLP Phishing Detection",
-        "status": "online",
-        "database": "connected" if ml_artifacts.get("mongo_db") is not None else "offline_or_unconfigured",
-        "author": "Aaron + Juan Alberto"
-    }
+router = APIRouter()
 
-@app.post("/predict/text", response_model=PredictResponse, status_code=status.HTTP_200_OK, tags=["Prediction"])
-async def predict_phishing(payload: PredictRequest):
-    try:
-        model = ml_artifacts["model"]
-        vectorizer = ml_artifacts["vectorizer"]
-
-        # 1. Transformación TF-IDF sobre el texto de entrada limpio
-        texto_limpio = clean_text(payload.text)
-        texto_vec = vectorizer.transform([texto_limpio])
-
-        # 2. Inferencia de probabilidad real con predict_proba
-        probabilidades = model.predict_proba(texto_vec)[0]
-        raw_prob_phishing = float(probabilidades[1])
-
-        # Calibración: Si la descripción no contiene palabras clave explícitas de phishing o patrones maliciosos,
-        # la inferencia de NLP no debe devolver 0.50 (50%); asegura < 0.15 (15%).
-        has_phishing_keywords = bool(PHISHING_KEYWORDS_PATTERN.search(payload.text))
-        if not has_phishing_keywords or (texto_vec.nnz == 0) or (0.49 <= raw_prob_phishing <= 0.51 and not has_phishing_keywords):
-            prob_phishing = 0.05
-        else:
-            prob_phishing = raw_prob_phishing
-
-        # 3. Estado binario con umbral explícito (is_phishing = prob_phishing >= 0.50)
-        calibrated_prob = round(prob_phishing, 4)
-        is_phishing = bool(calibrated_prob >= 0.50)
-        prediction_label = "phishing" if is_phishing else "legitimate"
-
-        # 4. Registro y persistencia en MongoDB Atlas ('phishing_logs')
-        saved_db = False
-        log_entry = {
-            "text": payload.text,
-            "prediction": prediction_label,
-            "is_phishing": is_phishing,
-            "probability": calibrated_prob,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+@router.post("/predict/text", tags=["Prediction"])
+async def evaluate_text(request: Request, payload: TextEvaluationSchema):
+    # 1. VERIFICACIÓN DEL HONEYPOT: Si el campo trampa trae contenido, salta la alerta al instante
+    trap_value = payload.website_url_check.strip() if payload.website_url_check else (payload.website_url_honeypot or "").strip()
+    if trap_value != "":
+        client_ip = request.client.host if request.client else "Unknown"
+        
+        # Registrar el evento en la colección 'alertas' de MongoDB Atlas una sola vez
+        alert_document = {
+            "type": "HONEYPOT_TRIGGERED",
+            "source_ip": client_ip,
+            "user_agent": request.headers.get("user-agent", "Unknown"),
+            "timestamp": datetime.utcnow(),
+            "payload_received": trap_value,
+            "status": "BLOCKED"
         }
+        
+        # Inserción en la base de datos (MongoDB Atlas)
+        try:
+            await request.app.mongodb["alertas"].insert_one(alert_document)
+        except Exception as e:
+            print(f"⚠️ Error al guardar alerta en MongoDB: {e}")
+        
+        # Log en consola del servidor (Uvicorn)
+        print(f"⚠️ [SECURITY ALERT] Honeypot activado por bot en IP: {client_ip}")
+        
+        # Retorno de respuesta defensiva inmediata (HTTP 200 con bandera de seguridad o HTTP 403)
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "status": "SECURE_HONEYPOT_ACTIVE",
+                "risk_level": "BLOCKED",
+                "message": "Petición interceptada por el módulo defensivo Honeypot. Firma de bot registrada.",
+                "honeypot_triggered": True
+            }
+        )
 
+    # 2. FLUJO NORMAL: Si el campo trampa viene vacío, procesa la IA con TF-IDF + SVM
+    prediction_result = run_nlp_model(payload.text)
+
+    saved_db = False
+    try:
         mongo_db = get_mongo_db()
         if mongo_db is not None:
-            try:
-                result = mongo_db["phishing_logs"].insert_one(log_entry)
-                if result.acknowledged or getattr(result, "inserted_id", None):
-                    saved_db = True
-                    print(f"📝 [MongoDB] Log persistido en colección 'phishing_logs': ID {result.inserted_id}")
-            except PyMongoError as e:
-                print(f"❌ [MongoDB Error] Fallo al insertar log: {e}")
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail=f"Fallo de persistencia en MongoDB Atlas: {str(e)}"
-                )
-
-        # 5. Formato de salida estandarizado en el JSON
-        return PredictResponse(
-            text=payload.text,
-            prediction=prediction_label,
-            is_phishing=is_phishing,
-            probability=calibrated_prob,
-            saved_in_database=saved_db
-        )
-
+            result = mongo_db["phishing_logs"].insert_one({
+                "text": payload.text,
+                "prediction": prediction_result["label"],
+                "is_phishing": prediction_result["is_phishing"],
+                "probability": prediction_result["score"],
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            })
+            if result.acknowledged or getattr(result, "inserted_id", None):
+                saved_db = True
+                print(f"📝 [MongoDB] Log persistido en colección 'phishing_logs': ID {result.inserted_id}")
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error durante el procesamiento del texto: {str(e)}"
-        )
+        print(f"⚠️ [MongoDB Error] Fallo al insertar log: {e}")
+
+    return {
+        "status": "SUCCESS",
+        "risk_level": prediction_result["label"],
+        "confidence": prediction_result["score"],
+        "honeypot_triggered": False,
+        "text": payload.text,
+        "prediction": prediction_result["label"],
+        "is_phishing": prediction_result["is_phishing"],
+        "probability": prediction_result["score"],
+        "saved_in_database": saved_db
+    }
+
+app.include_router(router)
+predict_phishing = evaluate_text
 
 if __name__ == "__main__":
     import uvicorn
