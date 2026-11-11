@@ -524,11 +524,24 @@ async def honeypot_debug_db(request: Request):
 
 # --- Endpoints de Consulta / Acceso a la Base de Datos ---
 
+def _serialize_value(value):
+    """Convierte recursivamente ObjectId, datetime y estructuras anidadas a tipos JSON-serializables."""
+    try:
+        from bson import ObjectId as _BsonObjectId
+        if isinstance(value, _BsonObjectId):
+            return str(value)
+    except ImportError:
+        pass
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {k: _serialize_value(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_serialize_value(v) for v in value]
+    return value
+
 def _serialize_doc(doc):
-    d = dict(doc)
-    if "_id" in d:
-        d["_id"] = str(d["_id"])
-    return d
+    return _serialize_value(dict(doc))
 
 @app.get("/api/v1/database/records", tags=["Database Access"])
 async def get_all_database_records():
